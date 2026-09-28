@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nsm-bayes"
+version = "0.1.0"
+description = "NSM-Bayes experiment scripts"
+requires-python = ">=3.9"
+dependencies = [
+    "hydra-core",
+    "joblib",
+    "numpy",
+    "scikit-learn",
+    "sbi",
+    "scipy",
+    "torch",
+    "tqdm",
+]
+
+[tool.setuptools]
+py-modules = []
