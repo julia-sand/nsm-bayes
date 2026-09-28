@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "NSM-Bayes experiment scripts"
 requires-python = ">=3.9"
 dependencies = [
-    "hydra-core",
-    "joblib",
-    "numpy",
-    "scikit-learn",
-    "sbi",
-    "scipy",
-    "torch",
-    "tqdm",
+    "hydra-core>=1.3.2",
+    "joblib>=1.4.2",
+    "numpy>=1.26.4",
+    "scikit-learn>=1.4.2",
+    "sbi>=0.22.0",
+    "scipy>=1.12.0",
+    "torch>=2.2.0",
+    "tqdm>=4.66.0",
 ]
 
 [tool.setuptools]
