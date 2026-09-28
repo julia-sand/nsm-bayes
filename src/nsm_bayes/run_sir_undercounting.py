@@ -1,26 +1,25 @@
-import torch
-from sbi.inference import SNLE
-from sbi.utils.sbiutils import standardizing_net
-from torch.distributions import MultivariateNormal
-from tqdm import tqdm
-import numpy as np
-import time
 import random
-
-from math import sqrt, pi, exp
-
-from simulators import simulate_sir, sir_summary
-from utils import *
-from method import *
-from gpc import *
-from slice_sampler import *
-from nn_case1 import TphiNet, BphiNet, train_q_phi
-
-import hydra
-from omegaconf import DictConfig
+import time
 from pathlib import Path
 import pickle
+
+import numpy as np
+import torch
+from torch.distributions import MultivariateNormal
+from tqdm import tqdm
+
+import hydra
 from hydra.utils import get_original_cwd
+from omegaconf import DictConfig
+from sbi.inference import SNLE
+from sbi.utils.sbiutils import standardizing_net
+
+from gpc import *
+from method import *
+from nn_case1 import BphiNet, TphiNet, train_q_phi
+from simulators import simulate_sir, sir_summary
+from slice_sampler import *
+from utils import *
 
 def make_nle_logprob(estimator):
     """
