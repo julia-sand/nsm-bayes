@@ -1,9 +1,11 @@
 # Direct runtime dependencies for the NSM-Bayes experiment scripts.
-hydra-core
-joblib
-numpy
-scikit-learn
-sbi
-scipy
-torch
-tqdm
+# Upper bounds keep the research environment from silently crossing
+# major-version compatibility boundaries.
+hydra-core>=1.3,<2
+joblib>=1.4,<2
+numpy>=1.26,<2
+scikit-learn>=1.4,<2
+sbi>=0.23,<0.28
+scipy>=1.11,<2
+torch>=2.1,<3
+tqdm>=4.66,<5
