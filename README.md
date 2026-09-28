@@ -1,6 +1,6 @@
 # NSM-Bayes
 
-This repository contains a Python package for simulation-based Bayesian inference with neural summary model (NSM) approaches, including experimental scripts for standard and misspecified settings.
+This repository contains a Python package for simulation-based Bayesian inference with neural score matching (NSM) approaches, including experimental scripts for standard and misspecified settings.
 
 ## Overview
 
@@ -14,14 +14,6 @@ The project focuses on Bayesian inference for simulator-based models, with imple
 
 ```text
 .
-├── baselines/
-│   ├── README.md
-│   ├── Robust-SBI/
-│   ├── neuralgbi/
-│   ├── npl_mmd_project/
-│   ├── results/
-│   ├── robust_snle/
-│   └── scoring_rule/
 ├── src/
 │   └── nsm_bayes/
 │       ├── config/
@@ -79,22 +71,6 @@ Core dependencies are declared in `pyproject.toml`, including:
 - `scipy`
 - `torch`
 - `tqdm`
-
-## Baselines
-
-The `baselines/` directory contains comparison methods and experiments for robust simulation-based inference, including:
-
-- Robust-SBI
-- neuralgbi
-- npl_mmd_project
-- robust_snle
-- scoring_rule
-
-See `baselines/README.md` for details on running these benchmark methods.
-
-## Notes
-
-This repository is primarily intended for research and experiment execution rather than as a general-purpose library package. Several scripts and support modules are specific to simulation experiments and benchmarking workflows.
 
 ## License
 
