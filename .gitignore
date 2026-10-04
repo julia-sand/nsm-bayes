@@ -5,6 +5,7 @@
 # Virtual environment folders
 .venv/
 venv/
+myenv/
 
 # macOS system files
 .DS_Store
@@ -21,3 +22,16 @@ outputs/
 
 # Jupyter Notebook checkpoints
 **/.ipynb_checkpoints/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Experiment outputs and Hydra logs
+data/
+*.log
+
+*.patch
+AGENTS.md
+*.orig

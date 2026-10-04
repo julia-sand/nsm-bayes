@@ -1,11 +1,10 @@
 import torch
 from torch.func import vmap, jacrev, hessian
-from method import *
-from utils import *
-from slice_sampler import *
+from nsm_bayes.method import compute_posterior_case1, robust_mean_cov, w_imq_squared
 from scipy.stats import chi2
 from tqdm import tqdm
 import math
+from typing import Callable, Optional
 
 ######-------Functions needed for general posterior calibration (setting the learning rate) for NSM-Bayes------#########
 def weight_function_factory_batched(name: str, x_obs: torch.Tensor, mu_hat: torch.Tensor,

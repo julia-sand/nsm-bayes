@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader, random_split
 import copy
 from typing import Dict
-from method import calculate_training_loss
+from nsm_bayes.method import calculate_training_loss
     
 class TphiNet(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):

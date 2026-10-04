@@ -6,12 +6,22 @@ import time
 import random
 import numpy as np
 
-from simulators import sample_gandk_fully_reparameterized
-from utils import *
-from method import *
-from nn_case1 import TphiNet, BphiNet, train_q_phi
-from slice_sampler import *
-from gpc import *
+from nsm_bayes.utils import (
+    add_outliers_by_proportion,
+    get_simulations,
+    run_mcmc,
+    sample_mean_and_covariance,
+)
+from nsm_bayes.method import (
+    ScoreMatchingLogPosterior,
+    compute_posterior_case1,
+    robust_mean_cov,
+    w_imq_squared,
+)
+from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
+from nsm_bayes.nn_case1 import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.simulators import sample_gandk_fully_reparameterized
 
 import hydra
 from omegaconf import DictConfig

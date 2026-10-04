@@ -16,6 +16,7 @@ The project focuses on Bayesian inference for simulator-based models, with imple
 .
 ├── src/
 │   └── nsm_bayes/
+│       ├── __init__.py
 │       ├── config/
 │       ├── gpc.py
 │       ├── method.py
@@ -49,13 +50,22 @@ python -m pip install -r requirements.txt
 
 ## Usage
 
-The package exposes experiment runners in `src/nsm_bayes/`. Examples include:
+After installation, each experiment has a console script (these are Hydra apps, so config values can be overridden on the command line):
 
 ```bash
-python src/nsm_bayes/run_gnk.py
-python src/nsm_bayes/run_sir.py
-python src/nsm_bayes/run_turin.py
+nsm-bayes-gnk
+nsm-bayes-sir
+nsm-bayes-sir-undercounting
+nsm-bayes-turin
 ```
+
+Equivalently, run them as modules:
+
+```bash
+python -m nsm_bayes.run_gnk num_repeat=2
+```
+
+Results are written to `data/<experiment_name>/` under the directory you launch from. The Turin experiment additionally expects pre-simulated data at `rca_sbi/data_turin/turin_theta.pt` and `turin_x_sim.pt`, also relative to the launch directory.
 
 Depending on the experiment, some scripts may require additional configuration or environment setup. The `baselines/README.md` file documents additional benchmark pipelines and reference implementations.
 

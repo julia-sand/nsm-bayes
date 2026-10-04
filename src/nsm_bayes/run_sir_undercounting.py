@@ -1,12 +1,9 @@
-import random
 import time
 from pathlib import Path
 import pickle
 
-import numpy as np
 import torch
 from torch.distributions import MultivariateNormal
-from tqdm import tqdm
 
 import hydra
 from hydra.utils import get_original_cwd
@@ -14,12 +11,21 @@ from omegaconf import DictConfig
 from sbi.inference import SNLE
 from sbi.utils.sbiutils import standardizing_net
 
-from gpc import *
-from method import *
-from nn_case1 import BphiNet, TphiNet, train_q_phi
-from simulators import simulate_sir, sir_summary
-from slice_sampler import *
-from utils import *
+from nsm_bayes.utils import (
+    apply_undercounting_trajectory,
+    run_mcmc,
+    sample_mean_and_covariance,
+)
+from nsm_bayes.method import (
+    ScoreMatchingLogPosterior,
+    compute_posterior_case1,
+    robust_mean_cov,
+    w_imq_squared,
+)
+from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
+from nsm_bayes.nn_case1 import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.simulators import simulate_sir, sir_summary
 
 def make_nle_logprob(estimator):
     """
@@ -57,7 +63,7 @@ def make_nle_logprob(estimator):
 
 print("PyTorch version:", torch.__version__)
 @hydra.main(version_base=None, config_path="config", config_name="sir_undercounting")
-def run_sir(cfg : DictConfig):
+def run_sir_undercounting(cfg : DictConfig):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -360,4 +366,4 @@ def run_sir(cfg : DictConfig):
         print("Iteration number: ", ind)
 
 if __name__ == "__main__":
-    run_sir() 
+    run_sir_undercounting() 

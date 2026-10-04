@@ -5,16 +5,18 @@ from torch.distributions import MultivariateNormal
 from tqdm import tqdm
 import numpy as np
 import time
-import random
 
-from math import sqrt, pi, exp
-
-from simulators import simulate_sir, sir_summary
-from utils import *
-from method import *
-from gpc import *
-from slice_sampler import *
-from nn_case1 import TphiNet, BphiNet, train_q_phi
+from nsm_bayes.utils import run_mcmc, simulate_contaminated_dataset
+from nsm_bayes.method import (
+    ScoreMatchingLogPosterior,
+    compute_posterior_case1,
+    robust_mean_cov,
+    w_imq_squared,
+)
+from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
+from nsm_bayes.nn_case1 import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.simulators import simulate_sir, sir_summary
 
 import hydra
 from omegaconf import DictConfig
