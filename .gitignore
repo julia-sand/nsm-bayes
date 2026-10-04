@@ -18,8 +18,6 @@ myenv/
 sbi-logs/
 outputs/
 
-
-
 # Jupyter Notebook checkpoints
 **/.ipynb_checkpoints/
 
