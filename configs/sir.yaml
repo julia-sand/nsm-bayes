@@ -1,0 +1,56 @@
+hydra:
+  job_logging:
+    formatters:
+      simple:
+        format: "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    handlers:
+      file:
+        class: logging.FileHandler
+        filename: ${hydra.job.name}.log
+        formatter: simple
+        level: INFO
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        level: INFO
+
+
+experiment_name: "sir" # Simulator name
+
+num_repeat: 5            # Number of repetitions of the experiment
+
+num_samples: 50000        # Number of training data samples
+
+prior_mean: [0.5, 0.2, 0.5, 20]
+prior_std: [0.5, 0.5, 1.0, 0.7]
+
+theta_true: [0.6, 0.15, 0.6, 20.]
+n_obs: 100              # Number of observed data samples
+n_obs_ref: 1000         # Number of observed data samples for the reference posterior
+
+epsilon: 0.05                          # Percentage of outliers in the data
+
+N_sir: 1000
+T_sir: 150
+
+num_posterior_samples: 500            # Number of posterior samples
+num_chains: 1 
+warmup_steps: 500
+thin: 1
+
+beta_base_general: 1e-6           # A reasonable starting value for beta for the general case
+beta_min_general: 1e-8      # Clamping beta at a minimum value for NSM-Bayes
+beta_base_case1: 0.01           # A reasonable starting value for beta for case 1
+beta_min_case1: 1e-4      # Clamping beta at a minimum value for NSM-Bayes-conj
+
+B: 100                   # Number of bootstrap samples
+T: 20                    # Number of iterations when updating beta
+alpha: 0.05              # 1-alpha credible set
+
+hidden_dim: 128          # Hidden dimension of neural network used in case 1
+
+d_x: 3
+
+sr_num_samples_per_param: 6
+sr_num_samples_per_param_boot: 3
+sr_num_posterior_bootstrap: 180

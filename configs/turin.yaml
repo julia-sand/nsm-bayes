@@ -1,0 +1,51 @@
+hydra:
+  job_logging:
+    formatters:
+      simple:
+        format: "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    handlers:
+      file:
+        class: logging.FileHandler
+        filename: ${hydra.job.name}.log
+        formatter: simple
+        level: INFO
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        level: INFO
+
+
+experiment_name: "turin" # Simulator name
+
+num_repeat: 5            # Number of repetitions of the experiment
+
+num_samples: 50000        # Number of training data samples
+
+prior_mean: [-19.0, -19.0, 22.0, -22.0]
+prior_cov: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+theta_true: [4e-9, 7e-9, 5e9, 3e-10]
+n_obs: 100              # Number of observed data samples
+
+density_estimator: mdn    # Choose between "mdn" or "maf"
+
+epsilon: 0.1                          # Percentage of outliers in the data
+
+num_posterior_samples: 1000            # Number of posterior samples
+num_chains: 1 
+warmup_steps: 500
+thin: 1
+
+beta_base_general: 1e-2           # A reasonable starting value for beta for the general case
+beta_min_general: 1e-4      # Clamping beta at a minimum value for NSM-Bayes
+beta_base_case1: 0.01           # A reasonable starting value for beta for case 1
+beta_min_case1: 1e-4      # Clamping beta at a minimum value for NSM-Bayes-conj
+
+B: 100                   # Number of bootstrap samples
+T: 20                    # Number of iterations when updating beta
+alpha: 0.05              # 1-alpha credible set
+
+hidden_dim: 128          # Hidden dimension of neural network used in case 1
+
+d_x: 3
+
