@@ -7,7 +7,6 @@ This repository contains a Python package for simulation-based Bayesian inferenc
 The project focuses on Bayesian inference for simulator-based models, with implementations for:
 
 - `src/nsm_bayes/` package code for simulation models, samplers, and experiment runners
-- `baselines/` directory containing reference baseline methods and evaluation utilities
 - reproducible Python environment configuration via `pyproject.toml` and `requirements.txt`
 
 ## Repository structure
@@ -67,8 +66,6 @@ python -m nsm_bayes.run_gnk num_repeat=2
 
 Results are written to `data/<experiment_name>/` under the directory you launch from. The Turin experiment additionally expects pre-simulated data at `rca_sbi/data_turin/turin_theta.pt` and `turin_x_sim.pt`, also relative to the launch directory.
 
-Depending on the experiment, some scripts may require additional configuration or environment setup. The `baselines/README.md` file documents additional benchmark pipelines and reference implementations.
-
 ## Dependencies
 
 Core dependencies are declared in `pyproject.toml`, including:
@@ -81,7 +78,3 @@ Core dependencies are declared in `pyproject.toml`, including:
 - `scipy`
 - `torch`
 - `tqdm`
-
-## License
-
-No license file is included in the repository root. If you plan to distribute or reuse this code publicly, confirm the intended project license before publication.

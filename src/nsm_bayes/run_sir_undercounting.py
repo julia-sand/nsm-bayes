@@ -27,41 +27,9 @@ from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.nn_case1 import BphiNet, TphiNet, train_q_phi
 from nsm_bayes.simulators import simulate_sir, sir_summary
 
-def make_nle_logprob(estimator):
-    """
-    Returns a callable f(x, theta) -> Tensor of shape (1,)
-    that is compatible with cache_perx_sm_losses:
-      - accepts x with shape (d_x,) or (1, d_x)
-      - accepts theta with shape (d_theta,) or (1, d_theta)
-      - handles device/dtype
-      - reshapes to the (sample_dim, batch_dim, d_x) convention used by SBI's NFlowsFlow
-    """
-    # pick device/dtype from the estimator
-    p = next(estimator.parameters())
-    dev, dt = p.device, p.dtype
+from nsm_bayes.shared_funs import make_nle_logprob
 
-    def f(x, theta):
-        # ensure 1D event shapes
-        if x.ndim == 2:            # (1, d_x)
-            x_row = x.reshape(-1)
-        else:                       # (d_x,)
-            x_row = x.reshape(-1)
-        if theta.ndim == 2:         # (1, d_theta)
-            th_row = theta.reshape(-1)
-        else:                       # (d_theta,)
-            th_row = theta.reshape(-1)
 
-        # reshape to (sample_dim=1, batch_dim=1, d_x)
-        x_b  = x_row.to(device=dev, dtype=dt).reshape(1, 1, -1).contiguous()
-        th_b = th_row.to(device=dev, dtype=dt).reshape(1, -1).contiguous()
-
-        # NFlowsFlow.log_prob returns shape (sample_dim, batch_dim) = (1,1)
-        out = estimator.log_prob(x_b, th_b).reshape(-1)  # -> (1,)
-        return out
-
-    return f
-
-print("PyTorch version:", torch.__version__)
 @hydra.main(version_base=None, config_path="config", config_name="sir_undercounting")
 def run_sir_undercounting(cfg : DictConfig):
 
@@ -141,15 +109,10 @@ def run_sir_undercounting(cfg : DictConfig):
         y_obs = simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
         y_cor, is_contam = apply_undercounting_trajectory(y_obs, epsilon=epsilon, q=cfg.q, per_time=False)
         x_obs_mis = sir_summary(y_cor, N)
-        # x_obs = sir_summary(y_obs, N)
-        # x_obs_mis = add_student_t_noise(x_obs, epsilon, df=cfg.df)
 
         # Save the observed data without outliers
         with open(save_dir/ f"y_obs_{ind}.pkl", "wb") as f:
             pickle.dump(y_obs, f)
-
-        # with open(save_dir/ f"y_cor_{ind}.pkl", "wb") as f:
-        #     pickle.dump(y_cor, f)
 
         # Save the observed data with outliers
         with open(save_dir/ f"x_obs_mis_{ind}.pkl", "wb") as f:

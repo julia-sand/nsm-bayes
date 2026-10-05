@@ -29,30 +29,6 @@ def w_imq_squared(x, mu_hat, Sigma_inv, c):
 
     return w2
 
-# def weight_function_factory(name, mu_hat, Sigma_inv, c=1.0):
-#     """
-#     Returns a function (x) -> (w2, grad_w2)
-#     for the chosen weighting scheme.
-#     """
-#     def imq_weight(x):
-#         diff = (x - mu_hat).detach()
-#         norm_sq = diff @ Sigma_inv @ diff
-#         denom = 1.0 + norm_sq / c + 1e-12
-#         w2 = 1.0 / (denom ** 2)
-#         grad_w2 = - (4.0 / c) * (1.0 / (denom ** 3)) * (Sigma_inv @ diff) #- (2.0 / c) * (w2 ** 2) * (Sigma_inv @ diff)
-#         return w2, grad_w2
-
-#     def unweighted(x):
-#         w2 = torch.tensor(1.0, device=x.device, dtype=x.dtype)
-#         grad_w2 = torch.zeros_like(x)
-#         return w2, grad_w2
-
-#     weights = {
-#         "imq": imq_weight,
-#         "none": unweighted,
-#     }
-#     return weights[name.lower()]
-
 def weight_function_factory(name, mu_hat, Sigma_inv, c=1.0, zeta: float = 1.0):
     """
     Returns a function (x) -> (w2, grad_w2)

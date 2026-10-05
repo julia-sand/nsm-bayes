@@ -53,8 +53,6 @@ class BphiNet(nn.Module):
         return self.network(x)
     
 
-
-
 # Function to train q_phi of case 1
 def train_q_phi(
     x_sim: torch.Tensor,

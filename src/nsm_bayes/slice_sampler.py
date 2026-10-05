@@ -19,7 +19,6 @@ def run_multivariate_slice_sampler_tuned(
     if seed is not None:
         np.random.seed(seed)
 
-    d_theta = prior.event_shape[0]
     total_steps_per_chain = (warmup_steps + num_samples) * thin
     initial_thetas = prior.sample((num_chains,)).numpy()
 
