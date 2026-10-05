@@ -15,7 +15,7 @@ from nsm_bayes.method import (
 )
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.nn_case1 import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
 from nsm_bayes.simulators import simulate_sir, sir_summary
 
 import hydra

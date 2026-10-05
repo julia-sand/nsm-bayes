@@ -54,11 +54,11 @@ class BphiNet(nn.Module):
     
 
 # Function to train q_phi of case 1
-def train_q_phi(
+def train_q_phi(  #add training params to be passed explicitly?
     x_sim: torch.Tensor,
     theta: torch.Tensor,
     T_phi_net: nn.Module,
-    b_phi_net: nn.Module
+    b_phi_net: nn.Module,
 ) -> Dict:
     """
     Trains the q_phi density estimator using Adam.
