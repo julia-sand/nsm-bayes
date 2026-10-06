@@ -6,52 +6,7 @@ import copy
 from typing import Dict
 from nsm_bayes.method import calculate_training_loss
     
-class TphiNet(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, output_dim),
-        )
-        self._initialize_weights()
-
-    def _initialize_weights(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    module.bias.data.fill_(0.01)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.network(x)
-    
-class BphiNet(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int):
-        """
-        Initializes the b_phi network.
-        Args:
-            input_dim (int): Dimension of x (D_X).
-            hidden_dim (int): Size of the hidden layers.
-        """
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, 1)
-        )
-        self._initialize_weights()
-
-    def _initialize_weights(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    module.bias.data.fill_(0.01)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.network(x)
-    
+from nsm_bayes.models import BphiNet, TphiNet
 
 # Function to train q_phi of case 1
 def train_q_phi(  #add training params to be passed explicitly?
