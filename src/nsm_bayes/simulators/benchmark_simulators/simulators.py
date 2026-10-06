@@ -7,9 +7,9 @@ from .sir import simulate_sir, sir_summary
 from .turin import TurinModel
 
 __all__ = [
+    "TurinModel",
     "sample_gandk_fully_reparameterized",
     "simulate_sir",
     "sir_summary",
-    "TurinModel",
 ]
 

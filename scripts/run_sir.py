@@ -1,37 +1,34 @@
+import pickle
 import time
 from pathlib import Path
-import pickle
-
-import torch
-from torch.distributions import MultivariateNormal
 
 import hydra
+import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from sbi.inference import SNLE
 from sbi.utils.sbiutils import standardizing_net
+from torch.distributions import MultivariateNormal
 
-from nsm_bayes.utils import (
-    apply_undercounting_trajectory,
-    run_mcmc,
-    sample_mean_and_covariance,
-)
+from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     compute_posterior_case1,
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
-from nsm_bayes.simulators import simulate_sir, sir_summary
-
 from nsm_bayes.shared_funs import make_nle_logprob
+from nsm_bayes.simulators.benchmark_simulators.simulators import (
+    simulate_sir,
+    sir_summary,
+)
+from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.utils import run_mcmc, simulate_contaminated_dataset
 
 
-@hydra.main(version_base=None, config_path="config", config_name="sir_undercounting")
-def run_sir_undercounting(cfg : DictConfig):
+@hydra.main(version_base=None, config_path="config", config_name="sir")
+def run_sir(cfg : DictConfig):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -65,6 +62,7 @@ def run_sir_undercounting(cfg : DictConfig):
 
     for ind in range(num_repeat):
         torch.manual_seed(ind+123)
+
 
         d_theta = prior_mean.shape[0]  # Number of parameters
         d_x = cfg.d_x # Data dimension
@@ -107,12 +105,23 @@ def run_sir_undercounting(cfg : DictConfig):
         theta_batch = theta_true.unsqueeze(0).repeat(n_obs, 1)
 
         y_obs = simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
-        y_cor, is_contam = apply_undercounting_trajectory(y_obs, epsilon=epsilon, q=cfg.q, per_time=False)
-        x_obs_mis = sir_summary(y_cor, N)
+        x_obs = sir_summary(y_obs, N) 
+
+        y_obs_mis, is_contam, theta_used = simulate_contaminated_dataset(
+            theta_true=theta_true,
+            n_obs=n_obs,
+            simulate_fn=simulate_sir,
+            T=T,
+            N=N,
+            epsilon=epsilon,
+            contaminant="prior",
+            prior=prior)
+        
+        x_obs_mis = sir_summary(y_obs_mis, N)
 
         # Save the observed data without outliers
-        with open(save_dir/ f"y_obs_{ind}.pkl", "wb") as f:
-            pickle.dump(y_obs, f)
+        with open(save_dir/ f"x_obs_{ind}.pkl", "wb") as f:
+            pickle.dump(x_obs, f)
 
         # Save the observed data with outliers
         with open(save_dir/ f"x_obs_mis_{ind}.pkl", "wb") as f:
@@ -138,12 +147,7 @@ def run_sir_undercounting(cfg : DictConfig):
 
         #######-------Run neural score-matching Bayes------#######
         c = 1.
-
-        if cfg.robust_flag == False:
-            mu_hat, Sigma_hat = sample_mean_and_covariance(x_obs_mis)
-        else:
-            mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
-
+        mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
         Sigma_inv = torch.linalg.inv(Sigma_hat + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
 
         start_time = time.perf_counter() 
@@ -161,7 +165,7 @@ def run_sir_undercounting(cfg : DictConfig):
             prior=prior,
             num_samples=cfg.num_posterior_samples, num_chains=cfg.num_chains, warmup_steps=cfg.warmup_steps, thin=cfg.thin
         )
-        theta_samples_base = torch.from_numpy(theta_samples_base).to(x_obs_mis.dtype).to(x_obs_mis.device)
+        theta_samples_base = torch.from_numpy(theta_samples_base).to(x_obs.dtype).to(x_obs.device)
 
         def refresh_sampler_at(beta_new: float) -> torch.Tensor:
             sm_lp = ScoreMatchingLogPosterior(
@@ -272,11 +276,7 @@ def run_sir_undercounting(cfg : DictConfig):
         scales = standardizer_theta.std
         prior_cov_normalized = prior_cov / torch.outer(scales, scales) # Normalize the prior covariance
 
-        if cfg.robust_flag == False:
-            mu_hat_obs, Sigma_hat_obs = sample_mean_and_covariance(x_obs_mis)
-        else:
-            mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
-
+        mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
         Sigma_inv_obs = torch.linalg.inv(Sigma_hat_obs + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
         c_case1 = 1.
         
@@ -329,4 +329,4 @@ def run_sir_undercounting(cfg : DictConfig):
         print("Iteration number: ", ind)
 
 if __name__ == "__main__":
-    run_sir_undercounting() 
+    run_sir() 

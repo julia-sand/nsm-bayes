@@ -32,7 +32,7 @@ def TurinModel(
     output : str, default "moments"
         "moments" to return 6D summary statistics, "data" for full time series.
     epsilon : float, default 0.0
-        Fraction (0–1) of outlier time series to replace with pure noise.
+        Fraction (0-1) of outlier time series to replace with pure noise.
     device : str, default "cpu"
         Device to use ("cpu" or "cuda").
 

@@ -1,35 +1,36 @@
+import pickle
+import random
+import time
+from pathlib import Path
+
+import hydra
+import numpy as np
 import torch
+from hydra.utils import get_original_cwd
+from omegaconf import DictConfig
 from sbi.inference import SNLE
 from sbi.utils.sbiutils import standardizing_net
 from torch.distributions import MultivariateNormal
-import time
-import random
-import numpy as np
 
-from nsm_bayes.utils import (
-    add_outliers_by_proportion,
-    get_simulations,
-    run_mcmc,
-    sample_mean_and_covariance,
-)
+from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     compute_posterior_case1,
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
-from nsm_bayes.simulators import sample_gandk_fully_reparameterized
-
-import hydra
-from omegaconf import DictConfig
-from pathlib import Path
-import pickle
-from hydra.utils import get_original_cwd
-
 from nsm_bayes.shared_funs import make_nle_logprob
+from nsm_bayes.simulators.benchmark_simulators.simulators import (
+    sample_gandk_fully_reparameterized,
+)
+from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.utils import (
+    add_outliers_by_proportion,
+    get_simulations,
+    run_mcmc,
+    sample_mean_and_covariance,
+)
 
 
 @hydra.main(version_base=None, config_path="config", config_name="gnk")

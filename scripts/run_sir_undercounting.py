@@ -1,104 +1,119 @@
+import pickle
+import time
+from pathlib import Path
+
+import hydra
 import torch
+from hydra.utils import get_original_cwd
+from omegaconf import DictConfig
 from sbi.inference import SNLE
 from sbi.utils.sbiutils import standardizing_net
 from torch.distributions import MultivariateNormal
-from tqdm import tqdm
-import time
 
-from nsm_bayes.utils import run_mcmc
+from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     compute_posterior_case1,
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
-from nsm_bayes.simulators import TurinModel
-
-import hydra
-from omegaconf import DictConfig
-from pathlib import Path
-import pickle
-from hydra.utils import get_original_cwd
-
 from nsm_bayes.shared_funs import make_nle_logprob
+from nsm_bayes.simulators.benchmark_simulators.simulators import (
+    simulate_sir,
+    sir_summary,
+)
+from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.utils import (
+    apply_undercounting_trajectory,
+    run_mcmc,
+    sample_mean_and_covariance,
+)
 
 
-@hydra.main(version_base=None, config_path="config", config_name="turin")
-def run_turin(cfg : DictConfig):
+@hydra.main(version_base=None, config_path="config", config_name="sir_undercounting")
+def run_sir_undercounting(cfg : DictConfig):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
+    num_sim = cfg.num_samples # Number of training data samples
 
     dtype = torch.float32
-    prior_mean = torch.tensor(cfg.prior_mean, dtype=dtype) # Prior mean vector
-    prior_cov  = torch.tensor(cfg.prior_cov,  dtype=dtype) # Prior covariance matrix
-    theta_true = torch.log(torch.tensor(cfg.theta_true, dtype=dtype)) # True parameter value
+    prior_mean = torch.tensor([
+        torch.log(torch.tensor(cfg.prior_mean[0])),         # log beta
+        torch.log(torch.tensor(cfg.prior_mean[1])),        # log gamma
+        torch.logit(torch.tensor(cfg.prior_mean[2])),        # logit rho
+        torch.log(torch.tensor(cfg.prior_mean[3])),           # log I0
+        ],  dtype=dtype)
+    
+    prior_std  = torch.tensor(cfg.prior_std,  dtype=dtype) 
+    prior_cov = torch.diag(prior_std ** 2) # Prior covariance matrix
+    theta_true = torch.tensor([
+        torch.log(torch.tensor(cfg.theta_true[0])),
+        torch.log(torch.tensor(cfg.theta_true[1])),
+        torch.logit(torch.tensor(cfg.theta_true[2])),
+        torch.log(torch.tensor(cfg.theta_true[3]))], dtype=dtype) # True parameter value 
 
     n_obs = cfg.n_obs # Number of observed data samples
+    n_obs_ref = cfg.n_obs_ref # Number of observed data samples
 
     epsilon = cfg.epsilon # Percentage of outliers in the observed data
 
-    d_theta = prior_mean.shape[0]  # Number of parameters
-    d_x = cfg.d_x # Data dimension
-
     # Setting directory for saving data
     original_cwd = get_original_cwd()
-    save_dir = (Path(original_cwd) / "data" / cfg.experiment_name / f"eps={cfg.epsilon}"/ f"de={cfg.density_estimator}")
+    save_dir = Path(original_cwd) / "data" / cfg.experiment_name
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
-    #######-------Load simulations----######
-    theta = torch.load(Path(original_cwd) / "rca_sbi/data_turin/turin_theta.pt")
-    x_sim = torch.load(Path(original_cwd) / "rca_sbi/data_turin/turin_x_sim.pt")
-
-    #####-----Train NLE using sbi library----#####
-    prior = MultivariateNormal(loc=prior_mean, covariance_matrix=prior_cov) # Define the Gaussian prior
-
-    #######-------Train q_phi using score-matching for NSM-conjugate------#######
-    dev = x_sim.device
-    x_sim  = x_sim.to(device=dev, dtype=dtype)
-    theta  = theta.to(device=dev, dtype=dtype)
-
-    T_phi_net = TphiNet(d_x, cfg.hidden_dim, d_theta)
-    b_phi_net = BphiNet(d_x, cfg.hidden_dim)
-
-    T_phi_net = T_phi_net.to(device=dev, dtype=dtype)
-    b_phi_net = b_phi_net.to(device=dev, dtype=dtype)
-
-    # Standardize the data
-    standardizer_x = standardizing_net(x_sim)
-    standardizer_theta = standardizing_net(theta)
-
-    # Apply the standardizers to get the normalized data for training
-    x_sim_normalized = standardizer_x(x_sim)
-    theta_sim_normalized = standardizer_theta(theta)
-
-    # Training on the normalized data
-    training_history = train_q_phi(
-        x_sim=x_sim_normalized,
-        theta=theta_sim_normalized,
-        T_phi_net=T_phi_net,
-        b_phi_net=b_phi_net
-    )
-
     for ind in range(num_repeat):
+        torch.manual_seed(ind+123)
 
-        inference = SNLE(prior, density_estimator=cfg.density_estimator)
+        d_theta = prior_mean.shape[0]  # Number of parameters
+        d_x = cfg.d_x # Data dimension
+
+        #######-------Generate training data-----######
+        start_time = time.perf_counter() # Record the start time
+
+        prior = MultivariateNormal(loc=prior_mean, covariance_matrix=prior_cov) # Define the Gaussian prior
+
+        #######-------Generate simulations----######
+        N = cfg.N_sir
+        T = cfg.T_sir
+        theta = prior.sample((num_sim,))
+        y_sim = simulate_sir(theta, T=T, N=N)
+        x_sim = sir_summary(y_sim, N)
+
+        #####-----Run NLE and MCMC using sbi library----#####
+
+        inference = SNLE(prior, density_estimator="maf")
         likelihood_estimator = inference.append_simulations(theta, x_sim).train()
 
-        torch.manual_seed(ind+1)
+        end_time = time.perf_counter() # Record the end time
+        cost_nle_training = end_time - start_time
+
+        # Saving the likelihood estimator network
+        torch.save(likelihood_estimator, save_dir / f"likelihood_estimator_full_{ind}.pt")
+
+        # Save the time taken to train NLE
+        with open(save_dir/ f"cost_nle_training_{ind}.pkl", "wb") as f:
+            pickle.dump(cost_nle_training, f)
+
+        # Save the training data
+        with open(save_dir/ f"theta_{ind}.pkl", "wb") as f:
+            pickle.dump(theta, f)
+
+        with open(save_dir/ f"x_sim_{ind}.pkl", "wb") as f:
+            pickle.dump(x_sim, f)
 
         #######-------Generate observed data-----######
-        x_obs_mis = TurinModel(
-            theta_true,
-            N=n_obs,
-            Ns=801,
-            output = "moments",
-            epsilon=epsilon,   # % outliers
-            device="cpu",
-        )
+        theta_batch = theta_true.unsqueeze(0).repeat(n_obs, 1)
+
+        y_obs = simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
+        y_cor, is_contam = apply_undercounting_trajectory(y_obs, epsilon=epsilon, q=cfg.q, per_time=False)
+        x_obs_mis = sir_summary(y_cor, N)
+
+        # Save the observed data without outliers
+        with open(save_dir/ f"y_obs_{ind}.pkl", "wb") as f:
+            pickle.dump(y_obs, f)
 
         # Save the observed data with outliers
         with open(save_dir/ f"x_obs_mis_{ind}.pkl", "wb") as f:
@@ -125,7 +140,11 @@ def run_turin(cfg : DictConfig):
         #######-------Run neural score-matching Bayes------#######
         c = 1.
 
-        mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
+        if cfg.robust_flag == False:
+            mu_hat, Sigma_hat = sample_mean_and_covariance(x_obs_mis)
+        else:
+            mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
+
         Sigma_inv = torch.linalg.inv(Sigma_hat + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
 
         start_time = time.perf_counter() 
@@ -208,17 +227,57 @@ def run_turin(cfg : DictConfig):
         with open(save_dir / f"beta_general_{ind}.pkl", "wb") as f:
             pickle.dump(beta, f)
 
+        #######-------Train q_phi using score-matching for NSM-conjugate------#######
+        T_phi_net = TphiNet(d_x, cfg.hidden_dim, d_theta)
+        b_phi_net = BphiNet(d_x, cfg.hidden_dim)
+
+        # Standardize the data
+        standardizer_x = standardizing_net(x_sim)
+        standardizer_theta = standardizing_net(theta)
+
+        # Apply the standardizers to get the normalized data for training
+        x_sim_normalized = standardizer_x(x_sim)
+        theta_sim_normalized = standardizer_theta(theta)
+
+        start_time = time.perf_counter() # Record the start time
+        # Training on the normalized data
+        training_history = train_q_phi(
+            x_sim=x_sim_normalized,
+            theta=theta_sim_normalized,
+            T_phi_net=T_phi_net,
+            b_phi_net=b_phi_net
+        )
+        end_time = time.perf_counter() # Record the end time
+        cost_sm_case1_train = end_time - start_time
+        # Save the time 
+        with open(save_dir/ f"cost_sm_case1_train_{ind}.pkl", "wb") as f:
+            pickle.dump(cost_sm_case1_train, f)
+
+        # Save the trained neural nets
+        torch.save(
+            {
+                "T_phi_state_dict": T_phi_net.state_dict(),
+                "B_phi_state_dict": b_phi_net.state_dict(),
+                "standardizer_x_state_dict": standardizer_x.state_dict(),
+                "standardizer_theta_state_dict": standardizer_theta.state_dict(),
+                "config": dict(cfg),
+            },
+            save_dir / f"case1_nets_{ind}.pt"
+        )
+
         #########-----Compute conjugate posterior (Case 1)-------#######
         start_time = time.perf_counter() # Record the start time
-
-        x_obs_mis  = x_obs_mis.to(device=dev, dtype=torch.float32)
 
         x_obs_normalized = standardizer_x(x_obs_mis) # Normalize the observed data
         prior_mean_normalized = standardizer_theta(prior_mean) # Normalize the prior mean
         scales = standardizer_theta.std
         prior_cov_normalized = prior_cov / torch.outer(scales, scales) # Normalize the prior covariance
 
-        mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
+        if cfg.robust_flag == False:
+            mu_hat_obs, Sigma_hat_obs = sample_mean_and_covariance(x_obs_mis)
+        else:
+            mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
+
         Sigma_inv_obs = torch.linalg.inv(Sigma_hat_obs + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
         c_case1 = 1.
         
@@ -271,4 +330,4 @@ def run_turin(cfg : DictConfig):
         print("Iteration number: ", ind)
 
 if __name__ == "__main__":
-    run_turin() 
+    run_sir_undercounting() 

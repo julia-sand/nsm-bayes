@@ -3,7 +3,7 @@ This module contains functions for simulating the SIR model.
 """
 
 import torch
-from torch.distributions import Binomial, Poisson, NegativeBinomial
+from torch.distributions import Binomial, NegativeBinomial, Poisson
 
 
 def simulate_sir(
