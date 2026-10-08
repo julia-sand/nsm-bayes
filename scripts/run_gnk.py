@@ -8,11 +8,9 @@ import numpy as np
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
-from sbi.inference import SNLE
 from sbi.utils.sbiutils import standardizing_net
 from torch.distributions import MultivariateNormal
 
-from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
@@ -20,7 +18,7 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.shared_funs import make_nle_logprob
+from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.benchmark_simulators.simulators import (
     sample_gandk_fully_reparameterized,
 )
@@ -33,7 +31,7 @@ from nsm_bayes.utils import (
 )
 
 
-@hydra.main(version_base=None, config_path="config", config_name="gnk")
+@hydra.main(version_base=None, config_path="../configs", config_name="gnk")
 def run_gnk(cfg : DictConfig):
 
     #####------Load config values-----######
@@ -76,8 +74,7 @@ def run_gnk(cfg : DictConfig):
 
         #####-----Run NLE and MCMC using sbi library----#####
 
-        inference = SNLE(prior, density_estimator="maf")
-        likelihood_estimator = inference.append_simulations(theta, x_sim).train()
+        likelihood_estimator = train_normflow(theta, x_sim, prior)
 
         end_time = time.perf_counter() # Record the end time
         cost_nle_training = end_time - start_time
@@ -115,7 +112,7 @@ def run_gnk(cfg : DictConfig):
 
         start_time = time.perf_counter() # Record the start time
         # NLE posterior samples under misspecification
-        samples_nle_mis = run_mcmc(x_obs_mis, inference, 
+        samples_nle_mis = run_mcmc(x_obs_mis, likelihood_estimator, 
                 num_pos_samples = cfg.num_posterior_samples,
                 num_chains = cfg.num_chains,
                 num_workers=cfg.num_chains,

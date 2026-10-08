@@ -5,12 +5,11 @@ from pathlib import Path
 import hydra
 import torch
 from hydra.utils import get_original_cwd
+from nsm_bayes.models.conjugate.conj import train_q_phi
 from omegaconf import DictConfig
-from sbi.inference import SNLE
 from sbi.utils.sbiutils import standardizing_net
 from torch.distributions import MultivariateNormal
 
-from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
@@ -18,16 +17,14 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.shared_funs import make_nle_logprob
-from nsm_bayes.simulators.benchmark_simulators.simulators import (
-    simulate_sir,
-    sir_summary,
-)
+from nsm_bayes.models.conjugate import BphiNet, TphiNet
+from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator, make_sir_prior
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import run_mcmc, simulate_contaminated_dataset
+from nsm_bayes.utils.utils import run_mcmc, simulate_contaminated_dataset
 
 
-@hydra.main(version_base=None, config_path="config", config_name="sir")
+@hydra.main(version_base=None, config_path="../configs", config_name="sir")
 def run_sir(cfg : DictConfig):
 
     #####------Load config values-----######
@@ -35,20 +32,22 @@ def run_sir(cfg : DictConfig):
     num_sim = cfg.num_samples # Number of training data samples
 
     dtype = torch.float32
-    prior_mean = torch.tensor([
-        torch.log(torch.tensor(cfg.prior_mean[0])),         # log beta
-        torch.log(torch.tensor(cfg.prior_mean[1])),        # log gamma
-        torch.logit(torch.tensor(cfg.prior_mean[2])),        # logit rho
-        torch.log(torch.tensor(cfg.prior_mean[3])),           # log I0
-        ],  dtype=dtype)
     
-    prior_std  = torch.tensor(cfg.prior_std,  dtype=dtype) 
-    prior_cov = torch.diag(prior_std ** 2) # Prior covariance matrix
-    theta_true = torch.tensor([
-        torch.log(torch.tensor(cfg.theta_true[0])),
-        torch.log(torch.tensor(cfg.theta_true[1])),
-        torch.logit(torch.tensor(cfg.theta_true[2])),
-        torch.log(torch.tensor(cfg.theta_true[3]))], dtype=dtype) # True parameter value 
+    # Use the new prior builder
+    prior_cfg = {
+        "mean": cfg.prior_mean,
+        "cov": torch.diag(torch.tensor(cfg.prior_std, dtype=dtype) ** 2).tolist()
+    }
+    prior = make_sir_prior(prior_cfg)
+    prior_mean = prior.loc
+    prior_cov = prior.covariance_matrix
+    
+    # Initialize simulator
+    sim = SIRSimulator(obs_model=cfg.obs_model if "obs_model" in cfg else "poisson")
+
+    # True parameters in unconstrained space
+    theta_true_constrained = torch.tensor(cfg.theta_true, dtype=dtype).unsqueeze(0)
+    theta_true = sim.to_unconstrained(theta_true_constrained).squeeze(0)
 
     n_obs = cfg.n_obs # Number of observed data samples
     n_obs_ref = cfg.n_obs_ref # Number of observed data samples
@@ -75,14 +74,14 @@ def run_sir(cfg : DictConfig):
         #######-------Generate simulations----######
         N = cfg.N_sir
         T = cfg.T_sir
+        
+        # Use class methods for training data generation
+        y_sim, x_sim = sim.generate_training_data(prior, num_sim, T, N)
         theta = prior.sample((num_sim,))
-        y_sim = simulate_sir(theta, T=T, N=N)
-        x_sim = sir_summary(y_sim, N)
 
         #####-----Run NLE and MCMC using sbi library----#####
 
-        inference = SNLE(prior, density_estimator="maf")
-        likelihood_estimator = inference.append_simulations(theta, x_sim).train()
+        likelihood_estimator = train_normflow(theta, x_sim, prior)
 
         end_time = time.perf_counter() # Record the end time
         cost_nle_training = end_time - start_time
@@ -129,7 +128,7 @@ def run_sir(cfg : DictConfig):
 
         start_time = time.perf_counter() # Record the start time
         # NLE posterior samples under misspecification
-        samples_nle_mis = run_mcmc(x_obs_mis, inference, 
+        samples_nle_mis = run_mcmc(x_obs_mis, likelihood_estimator, 
                 num_pos_samples = cfg.num_posterior_samples,
                 num_chains = cfg.num_chains,
                 num_workers=cfg.num_chains,
