@@ -1,10 +1,9 @@
-import torch
-from torch.func import vmap, jacrev, hessian, grad as fgrad, jvp
-from torch.autograd.functional import jacobian
-import numpy as np
-from sklearn.covariance import MinCovDet
 
-from typing import Callable
+import numpy as np
+import torch
+from sklearn.covariance import MinCovDet
+from torch.func import grad as fgrad
+from torch.func import hessian, jacrev, jvp, vmap
 
 # ===========================================================================================
 # PART 0: Common functions needed for the proposed neural score-matching Bayes method

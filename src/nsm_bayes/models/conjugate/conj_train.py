@@ -13,6 +13,12 @@ def train_q_phi(  #add training params to be passed explicitly?
     theta: torch.Tensor,
     T_phi_net: nn.Module,
     b_phi_net: nn.Module,
+    learning_rate: float = 5e-4,
+    num_epochs: int = 1000,
+    batch_size: int = 128,
+    weight_decay: float = 1e-5,
+    validation_split: float = 0.2,
+    early_stopping_patience: int = 20,
 ) -> Dict:
     """
     Trains the q_phi density estimator using Adam.
@@ -30,13 +36,7 @@ def train_q_phi(  #add training params to be passed explicitly?
                 'val_losses': List[float]
             }
     """
-    # --- 1. Define Fixed Hyperparameters Internally ---
-    learning_rate = 5e-4
-    num_epochs = 1000  # Max epochs; early stopping will likely trigger first
-    batch_size = 128
-    weight_decay = 1e-5
-    validation_split = 0.2
-    early_stopping_patience = 20
+    # --- 1. Training hyperparameters (defaults match the original fixed values) ---
     # scheduler_patience = 15
     
     # --- 2. Define Fixed `Sigma_inv` Internally ---

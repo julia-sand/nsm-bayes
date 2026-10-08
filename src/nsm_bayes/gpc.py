@@ -1,10 +1,13 @@
-import torch
-from torch.func import vmap, jacrev, hessian
-from nsm_bayes.method import compute_posterior_case1, robust_mean_cov, w_imq_squared
-from scipy.stats import chi2
-from tqdm import tqdm
 import math
-from typing import Callable, Optional
+from collections.abc import Callable
+
+import torch
+from scipy.stats import chi2
+from torch.func import hessian, jacrev, vmap
+from tqdm import tqdm
+
+from nsm_bayes.method import compute_posterior_case1, robust_mean_cov, w_imq_squared
+
 
 ######-------Functions needed for general posterior calibration (setting the learning rate) for NSM-Bayes------#########
 def weight_function_factory_batched(name: str, x_obs: torch.Tensor, mu_hat: torch.Tensor,
@@ -252,13 +255,12 @@ def calibrate_beta(
     alpha: float = 0.05,                # alpha -> 1-alpha is target coverage (e.g. 0.95)
     B: int = 200,                       # bootstraps per iteration
     T: int = 10,                        # number of stochastic approx iterations
-    beta_init: Optional[float] = None,
-    # 
+    beta_init: float | None = None,
     step_schedule: Callable[[int], float] = lambda t: 10.0 / (t + 10),
     max_log_step: float = 0.25,     # cap on k_t * (coverage error)
     beta_min: float = 0.01,
     ess_threshold: float = 0.3,         # if ESS too small, we may refresh samples
-    refresh_sampler: Optional[Callable[[float], torch.Tensor]] = None,  # sampler(beta)->(M,d)
+    refresh_sampler: Callable[[float], torch.Tensor] | None = None,  # sampler(beta)->(M,d)
 ) -> tuple[float, dict]:
     """
     Calibrate beta via bootstrap coverage matching for NSM-Bayes
@@ -348,8 +350,7 @@ def calibrate_beta(
         log_beta += log_step
 
         # clamp beta to avoid collapse to near-zero
-        if log_beta < log_beta_min:
-            log_beta = log_beta_min
+        log_beta = max(log_beta, log_beta_min)
 
         # Update current_beta for logging and potential refresh
         current_beta = math.exp(log_beta)
@@ -498,7 +499,6 @@ def calibrate_beta_gpc(
     target_coverage: float = 0.95,
     num_iterations: int = 50,
     num_bootstraps: int = 200,
-    # 
     learning_rate_fn = lambda t: 5.0 / (t + 10),
     max_log_step: float = 0.25,     # cap on k_t * (coverage error)
     beta_min: float = 0.01,
@@ -618,8 +618,7 @@ def calibrate_beta_gpc(
         log_beta += log_step
 
         # Clamp beta to avoid collapse
-        if log_beta < log_beta_min:
-            log_beta = log_beta_min
+        log_beta = max(log_beta, log_beta_min)
         
         beta = math.exp(log_beta)
 

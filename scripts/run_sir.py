@@ -5,7 +5,6 @@ from pathlib import Path
 import hydra
 import torch
 from hydra.utils import get_original_cwd
-from nsm_bayes.models.conjugate.conj import train_q_phi
 from omegaconf import DictConfig
 from sbi.utils.sbiutils import standardizing_net
 from torch.distributions import MultivariateNormal
@@ -17,15 +16,21 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.models.conjugate import BphiNet, TphiNet
+from nsm_bayes.models.conjugate.bphi_net import BphiNet
+from nsm_bayes.models.conjugate.conj_train import train_q_phi
+from nsm_bayes.models.conjugate.tphi_net import TphiNet
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
-from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator, make_sir_prior
+from nsm_bayes.simulators.add_noise import simulate_contaminated_dataset
+from nsm_bayes.simulators.benchmark_simulators.sir import (
+    SIRSimulator,
+    make_sir_prior,
+    sir_summary,
+)
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils.utils import run_mcmc, simulate_contaminated_dataset
+from nsm_bayes.utils import run_mcmc
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="sir")
-def run_sir(cfg : DictConfig):
+def _run(cfg: DictConfig, save_dir: Path):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -55,8 +60,6 @@ def run_sir(cfg : DictConfig):
     epsilon = cfg.epsilon # Percentage of outliers in the observed data
 
     # Setting directory for saving data
-    original_cwd = get_original_cwd()
-    save_dir = Path(original_cwd) / "data" / cfg.experiment_name
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
     for ind in range(num_repeat):
@@ -103,13 +106,13 @@ def run_sir(cfg : DictConfig):
         #######-------Generate observed data-----######
         theta_batch = theta_true.unsqueeze(0).repeat(n_obs, 1)
 
-        y_obs = simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
+        y_obs = sim.simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
         x_obs = sir_summary(y_obs, N) 
 
         y_obs_mis, is_contam, theta_used = simulate_contaminated_dataset(
             theta_true=theta_true,
             n_obs=n_obs,
-            simulate_fn=simulate_sir,
+            simulate_fn=sim.simulate_sir,
             T=T,
             N=N,
             epsilon=epsilon,
@@ -329,3 +332,9 @@ def run_sir(cfg : DictConfig):
 
 if __name__ == "__main__":
     run_sir() 
+
+@hydra.main(version_base=None, config_path="../configs", config_name="sir")
+def run_sir(cfg: DictConfig):
+    """Hydra entry point for the run_sir experiment."""
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
+    _run(cfg=cfg, save_dir=save_dir)

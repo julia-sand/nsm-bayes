@@ -8,7 +8,6 @@ from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
 
-from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
@@ -16,14 +15,14 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
+from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinModel
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils import run_mcmc
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="turin")
-def run_turin(cfg : DictConfig):
+def _run(cfg: DictConfig, save_dir: Path):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -41,8 +40,6 @@ def run_turin(cfg : DictConfig):
     d_x = cfg.d_x # Data dimension
 
     # Setting directory for saving data
-    original_cwd = get_original_cwd()
-    save_dir = (Path(original_cwd) / "data" / cfg.experiment_name / f"eps={cfg.epsilon}"/ f"de={cfg.density_estimator}")
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
     #######-------Load simulations----######
@@ -261,3 +258,9 @@ def run_turin(cfg : DictConfig):
 
 if __name__ == "__main__":
     run_turin() 
+
+@hydra.main(version_base=None, config_path="../configs", config_name="turin")
+def run_turin(cfg: DictConfig):
+    """Hydra entry point for the run_turin experiment."""
+    save_dir = (Path(get_original_cwd()) / "data" / cfg.experiment_name / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}")
+    _run(cfg=cfg, save_dir=save_dir)

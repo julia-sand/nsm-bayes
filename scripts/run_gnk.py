@@ -18,21 +18,20 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
+from nsm_bayes.models.conjugate.bphi_net import BphiNet
+from nsm_bayes.models.conjugate.conj_train import train_q_phi
+from nsm_bayes.models.conjugate.tphi_net import TphiNet
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.simulators.add_noise import add_outliers_by_proportion
 from nsm_bayes.simulators.benchmark_simulators.simulators import (
     sample_gandk_fully_reparameterized,
 )
+from nsm_bayes.simulators.simulators import get_simulations
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import (
-    add_outliers_by_proportion,
-    get_simulations,
-    run_mcmc,
-    sample_mean_and_covariance,
-)
+from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="gnk")
-def run_gnk(cfg : DictConfig):
+def _run(cfg: DictConfig, save_dir: Path):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -51,8 +50,6 @@ def run_gnk(cfg : DictConfig):
     outlier_values = cfg.outlier_values # Location of outliers
 
     # Setting directory for saving data
-    original_cwd = get_original_cwd()
-    save_dir = Path(original_cwd) / "data" / cfg.experiment_name
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
     for ind in range(num_repeat):
@@ -327,3 +324,9 @@ if __name__ == "__main__":
 
 
 
+
+@hydra.main(version_base=None, config_path="../configs", config_name="gnk")
+def run_gnk(cfg: DictConfig):
+    """Hydra entry point for the run_gnk experiment."""
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
+    _run(cfg=cfg, save_dir=save_dir)

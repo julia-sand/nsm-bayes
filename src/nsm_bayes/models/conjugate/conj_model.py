@@ -3,10 +3,10 @@ import torch
 from torch import nn
 
 from nsm_bayes.models.conjugate.bphi_net import BphiNet
+from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
-from nsm_bayes.models.conjugate.conj import train_q_phi
 
- 
+
 class TorchStandardizer(nn.Module):
     """Per-dimension (x - mean) / std with statistics stored as buffers, so they are
     saved in state_dict() and follow .to(device). Same statistics as sklearn's

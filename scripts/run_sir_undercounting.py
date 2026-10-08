@@ -16,21 +16,17 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
+from nsm_bayes.models.conjugate.bphi_net import BphiNet
+from nsm_bayes.models.conjugate.conj_train import train_q_phi
+from nsm_bayes.models.conjugate.tphi_net import TphiNet
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
-from nsm_bayes.simulators.benchmark_simulators.simulators import (
-    simulate_sir,
-    sir_summary,
-)
+from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
+from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator, sir_summary
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import (
-    apply_undercounting_trajectory,
-    run_mcmc,
-    sample_mean_and_covariance,
-)
+from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
 
 
-@hydra.main(version_base=None, config_path="../configs", config_name="sir_undercounting")
-def run_sir_undercounting(cfg : DictConfig):
+def _run(cfg: DictConfig, save_dir: Path):
 
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -57,9 +53,9 @@ def run_sir_undercounting(cfg : DictConfig):
 
     epsilon = cfg.epsilon # Percentage of outliers in the observed data
 
+    sim = SIRSimulator()
+
     # Setting directory for saving data
-    original_cwd = get_original_cwd()
-    save_dir = Path(original_cwd) / "data" / cfg.experiment_name
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
     for ind in range(num_repeat):
@@ -77,7 +73,7 @@ def run_sir_undercounting(cfg : DictConfig):
         N = cfg.N_sir
         T = cfg.T_sir
         theta = prior.sample((num_sim,))
-        y_sim = simulate_sir(theta, T=T, N=N)
+        y_sim = sim.simulate_sir(theta, T=T, N=N)
         x_sim = sir_summary(y_sim, N)
 
         #####-----Run NLE and MCMC using sbi library----#####
@@ -104,7 +100,7 @@ def run_sir_undercounting(cfg : DictConfig):
         #######-------Generate observed data-----######
         theta_batch = theta_true.unsqueeze(0).repeat(n_obs, 1)
 
-        y_obs = simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
+        y_obs = sim.simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
         y_cor, is_contam = apply_undercounting_trajectory(y_obs, epsilon=epsilon, q=cfg.q, per_time=False)
         x_obs_mis = sir_summary(y_cor, N)
 
@@ -328,3 +324,9 @@ def run_sir_undercounting(cfg : DictConfig):
 
 if __name__ == "__main__":
     run_sir_undercounting() 
+
+@hydra.main(version_base=None, config_path="../configs", config_name="sir_undercounting")
+def run_sir_undercounting(cfg: DictConfig):
+    """Hydra entry point for the run_sir_undercounting experiment."""
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
+    _run(cfg=cfg, save_dir=save_dir)

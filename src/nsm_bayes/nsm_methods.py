@@ -20,14 +20,11 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import torch
 from torch.distributions import MultivariateNormal
-
-from sbi.inference import SNLE
-from sbi.utils.sbiutils import standardizing_net
 
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
@@ -36,7 +33,8 @@ from nsm_bayes.method import (
     robust_mean_cov,
     w_imq_squared,
 )
-from nsm_bayes.conj import BphiNet, TphiNet, train_q_phi
+from nsm_bayes.models.conjugate import ConjugateModel
+from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 
 # Method-specific starting values for beta and its lower clamp. These are the values
@@ -56,8 +54,8 @@ class NSMConfig:
     alpha: float = 0.05            # target credible-set coverage is 1 - alpha
     B: int = 100                   # bootstrap resamples per calibration iteration
     T: int = 20                    # number of calibration iterations
-    beta_base: Optional[float] = None   # starting beta; None -> method-specific default
-    beta_min: Optional[float] = None    # lower clamp on beta; None -> method-specific default
+    beta_base: float | None = None   # starting beta; None -> method-specific default
+    beta_min: float | None = None    # lower clamp on beta; None -> method-specific default
 
     # --- posterior draws ---
     # general: slice-sampler settings. conj: only num_posterior_samples is used, to draw
@@ -70,7 +68,7 @@ class NSMConfig:
     # --- conj only ---
     hidden_dim: int = 128          # hidden width of T_phi / b_phi
 
-    seed: Optional[int] = None
+    seed: int | None = None
 
 
 @dataclass
@@ -132,19 +130,6 @@ def _weights_stats(x: torch.Tensor):
     return mu_hat, Sigma_inv
 
 
-def _nle_logprob(estimator):
-    """f(x, theta) -> shape (1,), the form calibrate_beta expects (same as run_sir.py)."""
-    p = next(estimator.parameters())
-    dev, dt = p.device, p.dtype
-
-    def f(x, theta):
-        x_b = x.reshape(-1).to(device=dev, dtype=dt).reshape(1, 1, -1).contiguous()
-        th_b = theta.reshape(-1).to(device=dev, dtype=dt).reshape(1, -1).contiguous()
-        return estimator.log_prob(x_b, th_b).reshape(-1)
-
-    return f
-
-
 def _summarise(samples: torch.Tensor):
     mean = samples.mean(dim=0)
     cov = torch.cov(samples.T) if samples.shape[1] > 1 else samples.var(dim=0).reshape(1, 1)
@@ -160,8 +145,8 @@ def nsm_bayes_general(
     x_sim: torch.Tensor,        # (m, d_x)  simulated data for theta_sim
     prior_mean: torch.Tensor,   # (d_theta,)
     prior_cov: torch.Tensor,    # (d_theta, d_theta)
-    config: Optional[NSMConfig] = None,
-    model: Optional[Any] = None,   # trained likelihood estimator from a previous result
+    config: NSMConfig | None = None,
+    model: Any | None = None,   # trained likelihood estimator from a previous result
 ) -> NSMResult:
     """General NSM-Bayes. Trains an sbi SNLE/MAF likelihood estimator on (theta_sim, x_sim)
     unless `model` is given, then samples the weighted score-matching posterior with the
@@ -174,8 +159,7 @@ def nsm_bayes_general(
     c = 1.0
 
     if model is None:
-        inference = SNLE(prior, density_estimator="maf")
-        model = inference.append_simulations(theta_sim, x_sim).train()
+        model = train_normflow(theta_sim, x_sim, prior)
 
     mu_hat, Sigma_inv = _weights_stats(x_obs)
 
@@ -197,7 +181,7 @@ def nsm_bayes_general(
         theta_samples_base=theta_samples_base,
         beta_base=beta_base,
         x_obs=x_obs,
-        q_phi_log_prob=_nle_logprob(model),
+        q_phi_log_prob=make_nle_logprob(model),
         mu_hat=mu_hat,
         Sigma_inv=Sigma_inv,
         weight_type="imq",
@@ -225,8 +209,8 @@ def nsm_bayes_conj(
     x_sim: torch.Tensor,        # (m, d_x)  simulated data for theta_sim
     prior_mean: torch.Tensor,   # (d_theta,)
     prior_cov: torch.Tensor,    # (d_theta, d_theta)
-    config: Optional[NSMConfig] = None,
-    model: Optional[Any] = None,   # trained networks from a previous result
+    config: NSMConfig | None = None,
+    model: Any | None = None,   # trained networks from a previous result
 ) -> NSMResult:
     """NSM-Bayes-conj. Trains T_phi / b_phi by score matching on standardized
     (theta_sim, x_sim) unless `model` is given, calibrates beta, and returns the closed-form
@@ -237,21 +221,11 @@ def nsm_bayes_conj(
     beta_base, beta_min = _beta_settings(cfg, "conj")
 
     if model is None:
-        T_phi = TphiNet(d_x, cfg.hidden_dim, d_theta)
-        b_phi = BphiNet(d_x, cfg.hidden_dim)
-        standardizer_x = standardizing_net(x_sim)
-        standardizer_theta = standardizing_net(theta_sim)
-        train_history = train_q_phi(
-            x_sim=standardizer_x(x_sim),
-            theta=standardizer_theta(theta_sim),
-            T_phi_net=T_phi,
-            b_phi_net=b_phi,
-        )
-        model = dict(T_phi=T_phi, b_phi=b_phi, standardizer_x=standardizer_x,
-                     standardizer_theta=standardizer_theta, train_history=train_history)
+        model = ConjugateModel(d_x, cfg.hidden_dim, d_theta)
+        model.train(x_sim=x_sim, theta=theta_sim)
 
-    T_phi, b_phi = model["T_phi"], model["b_phi"]
-    standardizer_x, standardizer_theta = model["standardizer_x"], model["standardizer_theta"]
+    T_phi, b_phi = model.T_phi, model.b_phi
+    standardizer_x, standardizer_theta = model.standardizer_x, model.standardizer_theta
 
     beta, history = calibrate_beta_gpc(
         x_obs=x_obs,
