@@ -49,39 +49,11 @@ def run_mcmc(
     
     return posterior_samples
 
-def compute_mmd_lengthscale(y: torch.Tensor) -> torch.Tensor:
-    """
-    Computes the MMD kernel lengthscale using the median heuristic.
-    """
-    if y.dim() == 1:
-        y = y.unsqueeze(-1)
-        
-    sq_dists = torch.pdist(y) ** 2 
-    median_sq_dist = torch.median(sq_dists)
-    
-    return torch.sqrt(median_sq_dist / 2.0)
-
 def kernel_matrix(x: torch.Tensor, y: torch.Tensor, l: torch.Tensor) -> torch.Tensor:
     """Computes the Gaussian RBF kernel matrix."""
     sq_dists = torch.cdist(x, y, p=2)**2
     return torch.exp(-sq_dists / (2 * l**2))
 
-def compute_mmd(x: torch.Tensor, y: torch.Tensor, lengthscale: torch.Tensor) -> float:
-    """
-    Computes the V-statistic estimator of the squared MMD.
-    """
-    if x.dim() == 1: x = x.unsqueeze(-1)
-    if y.dim() == 1: y = y.unsqueeze(-1)
-    
-    m, n = x.shape[0], y.shape[0]
-
-    K_xx = kernel_matrix(x, x, lengthscale)
-    K_yy = k-ernel_matrix(y, y, lengthscale)
-    K_xy = kernel_matrix(x, y, lengthscale)
-
-    mmd_sq = (1 / (m * m)) * K_xx.sum() + (1 / (n * n)) * K_yy.sum() - (2 / (m * n)) * K_xy.sum()
-    
-    return mmd_sq.item()
 
 def sample_from_case1_gaussian(mu: torch.Tensor,
                                Sigma: torch.Tensor,

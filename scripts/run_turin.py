@@ -74,7 +74,7 @@ def _run(cfg: DictConfig, save_dir: Path):
     likelihood_estimator = train_normflow(
         theta, x_sim, prior, density_estimator=cfg.density_estimator)
 
-    torch.manual_seed(ind+1)
+    #torch.manual_seed(ind+1)
 
     #######-------Generate observed data-----######
     x_obs_mis = TurinModel(

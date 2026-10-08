@@ -222,7 +222,7 @@ def nsm_bayes_conj(
 
     if model is None:
         model = ConjugateModel(d_x, cfg.hidden_dim, d_theta)
-        model.train(x_sim=x_sim, theta=theta_sim)
+        model.fit(x_sim=x_sim, theta_sim=theta_sim)
 
     T_phi, b_phi = model.T_phi, model.b_phi
     standardizer_x, standardizer_theta = model.standardizer_x, model.standardizer_theta

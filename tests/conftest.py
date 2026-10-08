@@ -10,9 +10,9 @@ seconds range:
 
 * the normalising-flow likelihood trainer (``nsm_bayes.models.general.
   normflow.SNLE``) is replaced by a lightweight :class:`_StubNLE`, and
-* the score-matching trainer's epoch budget is capped via ``monkeypatch.setattr``
-  on ``train_q_phi``'s defaults (the script passes only the required args, so
-  the defaults are what get used).
+* the score-matching trainer's epoch budget is capped via
+  ``monkeypatch.setattr`` on ``train_q_phi``'s defaults (the model passes
+  only the required args, so the defaults are what get used).
 """
 from __future__ import annotations
 
@@ -178,20 +178,15 @@ def _fast_runs(monkeypatch):
     # 1) Replace the normalising-flow trainer with the Gaussian stand-in.
     monkeypatch.setattr(normflow, "SNLE", _StubNLE)
 
-    # 2) Cap the score-matching training budget. The scripts import train_q_phi
-    # into their own namespaces, so patch every reference, not just the source.
+    # 2) Cap the score-matching training budget. ConjugateModel.fit calls
+    #    train_q_phi with only the required args, so patching it in its own
+    #    module is enough (the fit call resolves the name at runtime).
     orig_train_q_phi = conj_train.train_q_phi
     def _fast_train_q_phi(*args, **kwargs):
         kwargs.setdefault("num_epochs", 2)
         kwargs.setdefault("early_stopping_patience", 1)
         return orig_train_q_phi(*args, **kwargs)
     monkeypatch.setattr(conj_train, "train_q_phi", _fast_train_q_phi)
-    import scripts.run_gnk
-    import scripts.run_sir
-    import scripts.run_sir_undercounting
-    for _m in (scripts.run_gnk, scripts.run_sir, scripts.run_sir_undercounting):
-        if hasattr(_m, "train_q_phi"):
-            monkeypatch.setattr(_m, "train_q_phi", _fast_train_q_phi)
 
     # Keep MCMC/sampler chatter out of the captured test output.
     monkeypatch.setenv("SLICK_QUIET", "1")

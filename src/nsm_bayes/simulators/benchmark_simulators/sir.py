@@ -183,58 +183,9 @@ class SIRSimulator:
 
         return torch.stack([attack, t_peak, peak], dim=1)
 
-    def sir_summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
-        """Compute summary statistics for SIR incidence.
-
-        Parameters
-        ----------
-        y : torch.Tensor
-            Incidence data of shape (n, T).
-        N : float
-            Population size.
-
-        Returns
-        -------
-        torch.Tensor
-            Summary statistics of shape (n, 3): [attack_rate, t_peak_scaled, peak_scaled].
-        """
-        y = y.to(torch.float32)
-        n, T = y.shape
-
-        attack = y.sum(dim=1) / float(N)
-        peak = y.max(dim=1).values / float(N)
-        t_peak = y.argmax(dim=1).to(torch.float32) / float(max(T - 1, 1))
-
-        return torch.stack([attack, t_peak, peak], dim=1)
-
-
-    def sir_summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
-        """Compute summary statistics for SIR incidence.
-
-        Parameters
-        ----------
-        y : torch.Tensor
-            Incidence data of shape (n, T).
-        N : float
-            Population size.
-
-        Returns
-        -------
-        torch.Tensor
-            Summary statistics of shape (n, 3): [attack_rate, t_peak_scaled, peak_scaled].
-        """
-        y = y.to(torch.float32)
-        n, T = y.shape
-
-        attack = y.sum(dim=1) / float(N)
-        peak = y.max(dim=1).values / float(N)
-        t_peak = y.argmax(dim=1).to(torch.float32) / float(max(T - 1, 1))
-
-        return torch.stack([attack, t_peak, peak], dim=1)
-
     def generate_training_data(
         self, prior: MultivariateNormal, n: int, T: int, N: int
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Generate training data by sampling from the prior.
 
         Parameters
@@ -250,14 +201,14 @@ class SIRSimulator:
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor]
-            Tuple of (observed_data, summary_stats), where observed_data is (n, T)
-            and summary_stats is (n, 3).
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            Tuple of (theta, observed_data, summary_stats), where theta is
+            (n, d), observed_data is (n, T) and summary_stats is (n, 3).
         """
         theta = prior.sample((n,))
         y = self.simulate_sir(theta, T=T, N=N)
         summary = self.sir_summary(y, N)
-        return y, summary
+        return theta, y, summary
 
     def generate_observed_data(
         self,
