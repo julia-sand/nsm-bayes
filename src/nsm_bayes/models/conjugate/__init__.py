@@ -1,4 +1,3 @@
-from .bphi_net import BphiNet
-from .tphi_net import TphiNet
+from nsm_bayes.models.conjugate.conj_model import ConjugateModel
 
-__all__ = ["BphiNet", "TphiNet"]
+__all__ = ["ConjugateModel"]

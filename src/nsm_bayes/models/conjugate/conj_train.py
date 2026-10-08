@@ -6,9 +6,8 @@ import copy
 from typing import Dict
 from nsm_bayes.method import calculate_training_loss
     
-from nsm_bayes.models import BphiNet, TphiNet
 
-# Function to train q_phi of case 1
+# Function to train the surrogate model for the conjugate case
 def train_q_phi(  #add training params to be passed explicitly?
     x_sim: torch.Tensor,
     theta: torch.Tensor,
