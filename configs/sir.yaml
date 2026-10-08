@@ -1,19 +1,7 @@
-hydra:
-  job_logging:
-    formatters:
-      simple:
-        format: "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-    handlers:
-      file:
-        class: logging.FileHandler
-        filename: ${hydra.job.name}.log
-        formatter: simple
-        level: INFO
-      console:
-        class: logging.StreamHandler
-        formatter: simple
-        level: INFO
-
+defaults:
+  - _base
+  - _self_
+  
 
 experiment_name: "sir" # Simulator name
 
