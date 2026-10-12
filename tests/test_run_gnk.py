@@ -74,3 +74,32 @@ def test_gnk_posterior_near_truth(gnk_run, gnk_cfg):
     theta_true = torch.tensor(gnk_cfg.theta_true, dtype=torch.float32)
     z = (mu - theta_true).abs() / torch.sqrt(torch.diagonal(cov)).clamp_min(1e-2)
     assert (z < 3.0).all(), f"posterior mean too far from truth (max z {z.max()})"
+
+
+def test_gnk_prior_matches_config():
+    """The built-in prior matches the hyperparameters in ``configs/gnk.yaml``."""
+    import torch
+    from omegaconf import OmegaConf
+
+    from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
+
+    cfg = OmegaConf.load("configs/gnk.yaml")
+    prior = GandKSimulator().prior()
+    assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
+    assert torch.allclose(
+        prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
+    )
+
+
+def test_gnk_simulate_shapes():
+    """``simulate`` accepts 1D and 2D theta and returns the expected shapes."""
+    from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
+
+    sim = GandKSimulator()
+    theta = sim.prior().sample((5,))
+    assert sim.simulate(theta).shape == (5,)
+    assert sim.simulate(theta[0]).dim() == 0
+    assert sim.simulate(theta[0].unsqueeze(0), n=4).shape == (4,)
+    assert sim.simulate(theta, n=4).shape == (5, 4)
+    x = sim.simulate(theta).unsqueeze(-1)
+    assert x.shape == (5, 1) and torch.isfinite(x).all()

@@ -78,6 +78,17 @@ def sir_cfg():
 
 
 @pytest.fixture
+def turin_cfg():
+    """Tiny Turin config: shrink the expensive simulator knobs too."""
+    cfg = _tiny_base("turin")
+    # Each training row is one receiver simulated under its own theta, so
+    # 12 training receivers (plus one observed dataset of 40) keep a fast
+    # end-to-end run on CPU.
+    cfg.update({"num_samples": 12, "n_obs": 40})
+    return OmegaConf.create(cfg)
+
+
+@pytest.fixture
 def sir_uc_cfg():
     return OmegaConf.create(_tiny_base("sir_undercounting"))
 

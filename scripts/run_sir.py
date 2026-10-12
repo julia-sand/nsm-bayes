@@ -6,32 +6,18 @@ import hydra
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
-from torch.distributions import MultivariateNormal
 
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
-
     ScoreMatchingLogPosterior,
-
     compute_posterior_case1,
-
     robust_mean_cov,
-
     w_imq_squared,
-
 )
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.add_noise import simulate_contaminated_dataset
-from nsm_bayes.simulators.benchmark_simulators.sir import (
-
-    SIRSimulator,
-
-    make_sir_prior,
-
-    sir_summary,
-
-)
+from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils import run_mcmc
 
@@ -46,25 +32,15 @@ def _run(cfg: DictConfig, save_dir: Path):
 
     dtype = torch.float32
 
-    # Use the new prior builder
+    # Initialize simulator
 
-    prior_cfg = {
+    sim = SIRSimulator(obs_model=cfg.obs_model if "obs_model" in cfg else "poisson")
 
-        "mean": cfg.prior_mean,
-
-        "cov": torch.diag(torch.tensor(cfg.prior_std, dtype=dtype) ** 2).tolist()
-
-    }
-
-    prior = make_sir_prior(prior_cfg)
+    prior = sim.prior()
 
     prior_mean = prior.loc
 
     prior_cov = prior.covariance_matrix
-
-    # Initialize simulator
-
-    sim = SIRSimulator(obs_model=cfg.obs_model if "obs_model" in cfg else "poisson")
 
     # True parameters in unconstrained space
 
@@ -93,8 +69,6 @@ def _run(cfg: DictConfig, save_dir: Path):
         #######-------Generate training data-----######
 
         start_time = time.perf_counter() # Record the start time
-
-        prior = MultivariateNormal(loc=prior_mean, covariance_matrix=prior_cov) # Define the Gaussian prior
 
         #######-------Generate simulations----######
 
@@ -140,9 +114,9 @@ def _run(cfg: DictConfig, save_dir: Path):
 
         theta_batch = theta_true.unsqueeze(0).repeat(n_obs, 1)
 
-        y_obs = sim.simulate_sir(theta_batch, T=T, N=N)   # (n_obs, T)
+        y_obs = sim.simulate(theta_batch, T=T, N=N)   # (n_obs, T)
 
-        x_obs = sir_summary(y_obs, N) 
+        x_obs = sim.summary(y_obs, N) 
 
         y_obs_mis, is_contam, theta_used = simulate_contaminated_dataset(
 
@@ -150,7 +124,7 @@ def _run(cfg: DictConfig, save_dir: Path):
 
             n_obs=n_obs,
 
-            simulate_fn=sim.simulate_sir,
+            simulate_fn=sim.simulate,
 
             T=T,
 
@@ -162,7 +136,7 @@ def _run(cfg: DictConfig, save_dir: Path):
 
             prior=prior)
 
-        x_obs_mis = sir_summary(y_obs_mis, N)
+        x_obs_mis = sim.summary(y_obs_mis, N)
 
         # Save the observed data without outliers
 

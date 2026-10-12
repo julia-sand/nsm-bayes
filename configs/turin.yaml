@@ -14,12 +14,17 @@ prior_cov: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0
 theta_true: [4e-9, 7e-9, 5e9, 3e-10]
 n_obs: 100              # Number of observed data samples
 
+# Turin channel model simulator settings
+B_hz: 4e9               # Bandwidth in Hz
+Ns: 801                 # Number of frequency samples
+device: "cpu"           # Device to use for the simulator
+
 density_estimator: mdn    # Choose between "mdn" or "maf"
 
 epsilon: 0.1                          # Percentage of outliers in the data
 
 num_posterior_samples: 1000            # Number of posterior samples
-num_chains: 1 
+num_chains: 1
 warmup_steps: 500
 thin: 1
 
@@ -35,4 +40,3 @@ alpha: 0.05              # 1-alpha credible set
 hidden_dim: 128          # Hidden dimension of neural network used in case 1
 
 d_x: 3
-

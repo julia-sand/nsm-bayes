@@ -14,6 +14,22 @@ class SIRSimulator:
     This class provides methods to simulate the stochastic SIR model, transform
     parameters between constrained and unconstrained spaces, and generate
     synthetic datasets for training and observation.
+
+    Methods
+    -------
+    to_unconstrained
+        Transform constrained parameters to unconstrained space.
+    to_constrained
+        Transform unconstrained parameters to constrained space.
+    simulate
+        Simulate a stochastic discrete-time SIR process.
+    summary
+        Compute summary statistics for SIR incidence.
+    generate_training_data
+        Generate training data by sampling from the prior.
+    generate_observed_data
+        Generate observed data with a mixture of clean and contaminated
+        samples.
     """
 
     def __init__(self, obs_model: str = "poisson", dt: float = 1.0):
@@ -79,7 +95,7 @@ class SIRSimulator:
             constrained[:, 4] = torch.exp(theta[:, 4])  # phi
         return constrained
 
-    def simulate_sir(
+    def simulate(
         self,
         theta: torch.Tensor,
         T: int = 100,
@@ -159,7 +175,7 @@ class SIRSimulator:
 
         return y
 
-    def sir_summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
+    def summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
         """Compute summary statistics for SIR incidence.
 
         Parameters
@@ -206,8 +222,8 @@ class SIRSimulator:
             (n, d), observed_data is (n, T) and summary_stats is (n, 3).
         """
         theta = prior.sample((n,))
-        y = self.simulate_sir(theta, T=T, N=N)
-        summary = self.sir_summary(y, N)
+        y = self.simulate(theta, T=T, N=N)
+        summary = self.summary(y, N)
         return theta, y, summary
 
     def generate_observed_data(
@@ -246,57 +262,48 @@ class SIRSimulator:
 
         # Clean data
         theta_clean = theta_true.repeat(n_clean, 1)
-        y_clean = self.simulate_sir(theta_clean, T=T, N=N)
+        y_clean = self.simulate(theta_clean, T=T, N=N)
 
         # Contaminated data
         theta_contam = prior.sample((n_contam,))
-        y_contam = self.simulate_sir(theta_contam, T=T, N=N)
+        y_contam = self.simulate(theta_contam, T=T, N=N)
 
         y = torch.cat([y_clean, y_contam], dim=0)
-        summary = self.sir_summary(y, N)
+        summary = self.summary(y, N)
 
         return y, summary
 
+    def prior(self) -> MultivariateNormal:
+        """Return the Gaussian prior used in the SIR experiments.
 
+        This is the prior defined in ``configs/sir.yaml`` (``prior_mean``
+        and ``prior_std``), in the unconstrained parameter space
+        ``(log_beta, log_gamma, logit_rho, log_I0)``.
 
-def sir_summary(y: torch.Tensor, N: float) -> torch.Tensor:
-    """Compute summary statistics for SIR incidence.
+        Returns
+        -------
+        MultivariateNormal
+            Prior distribution over the 4 unconstrained parameters.
+        """
+        mean = torch.tensor([0.5, 0.2, 0.5, 20.0], dtype=torch.float32)
+        std = torch.tensor([0.5, 0.5, 1.0, 0.7], dtype=torch.float32)
+        cov = torch.diag(std**2)
+        return MultivariateNormal(loc=mean, covariance_matrix=cov)
 
-    Parameters
-    ----------
-    y : torch.Tensor
-        Incidence data of shape (n, T).
-    N : float
-        Population size.
+    def make_sir_prior(self, cfg: dict) -> MultivariateNormal:
+        """Create a MultivariateNormal prior for SIR parameters.
 
-    Returns
-    -------
-    torch.Tensor
-        Summary statistics of shape (n, 3): [attack_rate, t_peak_scaled, peak_scaled].
-    """
-    y = y.to(torch.float32)
-    n, T = y.shape
+        Parameters
+        ----------
+        cfg : dict
+            Configuration dictionary containing 'mean' and 'cov' for the prior.
 
-    attack = y.sum(dim=1) / float(N)
-    peak = y.max(dim=1).values / float(N)
-    t_peak = y.argmax(dim=1).to(torch.float32) / float(max(T - 1, 1))
+        Returns
+        -------
+        MultivariateNormal
+            The prior distribution.
+        """
+        mean = torch.tensor(cfg["mean"], dtype=torch.float32)
+        cov = torch.tensor(cfg["cov"], dtype=torch.float32)
+        return MultivariateNormal(mean, cov)
 
-    return torch.stack([attack, t_peak, peak], dim=1)
-
-
-def make_sir_prior(cfg: dict) -> MultivariateNormal:
-    """Create a MultivariateNormal prior for SIR parameters.
-
-    Parameters
-    ----------
-    cfg : dict
-        Configuration dictionary containing 'mean' and 'cov' for the prior.
-
-    Returns
-    -------
-    MultivariateNormal
-        The prior distribution.
-    """
-    mean = torch.tensor(cfg["mean"], dtype=torch.float32)
-    cov = torch.tensor(cfg["cov"], dtype=torch.float32)
-    return MultivariateNormal(mean, cov)

@@ -8,29 +8,20 @@ import numpy as np
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
-from torch.distributions import MultivariateNormal
 
 from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
-
     ScoreMatchingLogPosterior,
-
     compute_posterior_case1,
-
     robust_mean_cov,
-
     w_imq_squared,
-
 )
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.add_noise import add_outliers_by_proportion
 from nsm_bayes.simulators.benchmark_simulators.simulators import (
-
-    sample_gandk_fully_reparameterized,
-
+    GandKSimulator,
 )
-from nsm_bayes.simulators.simulators import get_simulations
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
 
@@ -63,6 +54,9 @@ def _run(cfg: DictConfig, save_dir: Path):
 
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
+    # Initialize the g-and-k simulator
+    sim = GandKSimulator()
+
     for ind in range(num_repeat):
 
         random.seed(ind+1)
@@ -79,11 +73,11 @@ def _run(cfg: DictConfig, save_dir: Path):
 
         start_time = time.perf_counter() # Record the start time
 
-        prior = MultivariateNormal(loc=prior_mean, covariance_matrix=prior_cov) # Define the Gaussian prior
+        prior = sim.prior() # Define the Gaussian prior
 
         # Generate simulations
-
-        theta, x_sim = get_simulations(prior, sample_gandk_fully_reparameterized, num_samples, d_x)
+        theta = prior.sample((num_samples,))
+        x_sim = sim.simulate(theta).unsqueeze(-1)
 
         #####-----Run NLE and MCMC using sbi library----#####
 
@@ -115,7 +109,7 @@ def _run(cfg: DictConfig, save_dir: Path):
 
         #######-------Generate observed data-----######
 
-        x_obs = sample_gandk_fully_reparameterized(theta_true, n_obs).unsqueeze(-1)
+        x_obs = sim.simulate(theta_true, n=n_obs).unsqueeze(-1)
 
         x_obs_mis, outlier_indices = add_outliers_by_proportion(x_obs, epsilon, outlier_values) # Adding outliers
 

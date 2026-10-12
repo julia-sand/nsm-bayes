@@ -22,7 +22,7 @@ def sir_run(sir_cfg, tmp_path):
     return save_dir
 
 
-def test_sir_summary_stats(sir_run, sir_cfg):
+def test_summary_stats(sir_run, sir_cfg):
     """Summary statistics have the right shape, are finite and non-negative."""
     x_sim = load_tensor(sir_run, "x_sim_0.pkl")
     x_obs = load_tensor(sir_run, "x_obs_0.pkl")
@@ -41,3 +41,18 @@ def test_sir_case1_posterior(sir_run, sir_cfg):
     assert_posterior_artifacts(
         sir_run, d_theta=4, beta_min=float(sir_cfg.get("beta_min_case1", 0.0))
     )
+
+
+def test_sir_prior_matches_config():
+    """The built-in prior matches the hyperparameters in ``configs/sir.yaml``."""
+    from omegaconf import OmegaConf
+
+    from nsm_bayes.simulators.benchmark_simulators.simulators import SIRSimulator
+
+    cfg = OmegaConf.load("configs/sir.yaml")
+    prior = SIRSimulator().prior()
+    mean = torch.tensor(cfg.prior_mean, dtype=torch.float32)
+    cov = torch.diag(torch.tensor(cfg.prior_std, dtype=torch.float32) ** 2)
+    assert torch.allclose(prior.loc, mean)
+    assert torch.allclose(prior.covariance_matrix, cov)
+    assert prior.sample((5,)).shape == (5, 4)

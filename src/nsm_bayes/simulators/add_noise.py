@@ -1,7 +1,7 @@
 """Contains functions for adding outliers and noise to datasets for testing inference"""
-import numpy as np  
 import torch
-from torch.distributions import Binomial, MultivariateNormal, StudentT
+from torch.distributions import Binomial, StudentT
+
 
 ####----Function to add outliers to the observed data----####
 def add_outliers_by_proportion(data, epsilon, outlier_values):
