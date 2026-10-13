@@ -23,58 +23,60 @@ class GandKSimulator:
         Time step for the simulation.
     """
 
-    def __init__(self, dt: float = 1.0):
+    def __init__(
+        self,
+        dt: float = 1.0,
+        prior_mean: torch.Tensor | None = None,
+        prior_cov: torch.Tensor | None = None,
+    ) -> None:
         """Initialize the G and K simulator.
 
         Parameters
         ----------
         dt : float, default 1.0
             Time step for the simulation.
+        prior_mean : torch.Tensor, optional
+            Prior mean vector. If None, uses default values.
+        prior_cov : torch.Tensor, optional
+            Prior covariance matrix. If None, uses default values.
         """
         self.dt = dt
 
-    def prior(self) -> MultivariateNormal:
-        """Return the Gaussian prior used in the g-and-k experiments.
+        # Log-space prior mean and covariance
+        if prior_mean is not None:
+            self.prior_mean = prior_mean
+        else:
+            self.prior_mean = torch.tensor([0.0, 0.7, 0.0, -1.5], dtype=torch.float32)
 
-        This is the prior defined in ``configs/gnk.yaml`` (``prior_mean``
-        and ``prior_cov``), in the reparameterised parameter space
-        ``[A, log(B), g, log(k)]``.
-
-        Returns
-        -------
-        MultivariateNormal
-            Prior distribution over the 4 parameters.
-        """
-        mean = torch.tensor([0.0, 0.7, 0.0, -1.5], dtype=torch.float32)
-        cov = torch.tensor(
-            [
-                [5.0, 0.0, 0.0, 0.0],
-                [0.0, 0.5, 0.0, 0.0],
-                [0.0, 0.0, 4.0, 0.0],
-                [0.0, 0.0, 0.0, 0.25],
-            ],
-            dtype=torch.float32,
-        )
-        return MultivariateNormal(loc=mean, covariance_matrix=cov)
+        if prior_cov is not None:
+            self.prior_cov = prior_cov
+        else:
+            self.prior_cov = torch.tensor(
+                [
+                    [5.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.5, 0.0, 0.0],
+                    [0.0, 0.0, 4.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.25],
+                ],
+                dtype=torch.float32,
+            )
 
     def simulate(
         self,
         theta: torch.Tensor,
         n: int = 1,
+        **kwargs,
     ) -> torch.Tensor:
-        """Sample from the g-and-k distribution.
-
-        For each row of `theta` one (or `n`) scalar data points are
-        drawn, so the output has the same number of rows as the input.
+        """Simulate data for the g-and-k distribution.
 
         Parameters
         ----------
-        theta : torch.Tensor
-            Parameter vector (1D, shape ``(4,)``) or batch of parameter
-            vectors (2D, shape ``(n_theta, 4)``) containing the
-            transformed parameters ``[A, log(B), g, log(k)]``.
+        theta : array_like
+            Parameter vector [A, log(B), g, log(k)].
         n : int, default 1
             Number of samples to draw per parameter vector.
+        **kwargs : dict
+            Additional arguments (ignored).
 
         Returns
         -------
@@ -94,6 +96,32 @@ class GandKSimulator:
         if x.dim() == 2 and x.shape[0] == 1:
             return x.squeeze(0)
         return x
+
+    def generate_training_data(
+        self,
+        prior: MultivariateNormal,
+        n: int,
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Generate training data by sampling from the prior.
+
+        Parameters
+        ----------
+        prior : MultivariateNormal
+            Prior distribution.
+        n : int
+            Number of samples.
+        **kwargs : dict
+            Additional arguments (ignored).
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor]
+            Tuple of (theta, x_sim).
+        """
+        theta = prior.sample((n,))
+        x_sim = self.simulate(theta, n=1)
+        return theta, x_sim
 
     def sample_gandk_fully_reparameterized(
         self,
@@ -127,10 +155,7 @@ class GandKSimulator:
         k = torch.exp(logk)
 
         z = torch.randn(n, device=gamma.device)
-        # exp_gz = torch.exp(-g * z).clamp(min=1e-30, max=1e30)
-        # term_g = (1 - exp_gz) / (1 + exp_gz)
         term_g = torch.tanh(0.5 * g * z)
         term_k = (1 + z**2) ** k
         x = A + B * (1 + 0.8 * term_g) * term_k * z
         return x.squeeze()
-

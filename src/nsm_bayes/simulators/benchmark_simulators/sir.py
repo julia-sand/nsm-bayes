@@ -32,7 +32,13 @@ class SIRSimulator:
         samples.
     """
 
-    def __init__(self, obs_model: str = "poisson", dt: float = 1.0):
+    def __init__(
+        self,
+        obs_model: str = "poisson",
+        dt: float = 1.0,
+        prior_mean: torch.Tensor | None = None,
+        prior_cov: torch.Tensor | None = None,
+    ) -> None:
         """Initialize the SIR simulator.
 
         Parameters
@@ -41,9 +47,25 @@ class SIRSimulator:
             Observation model: "poisson" or "negbin".
         dt : float, default 1.0
             Time step for the simulation.
+        prior_mean : torch.Tensor, optional
+            Prior mean vector. If None, uses default values.
+        prior_cov : torch.Tensor, optional
+            Prior covariance matrix. If None, uses default values.
         """
         self.obs_model = obs_model
         self.dt = dt
+
+        # Log-space prior mean and covariance
+        if prior_mean is not None:
+            self.prior_mean = prior_mean
+        else:
+            self.prior_mean = torch.tensor([0.5, 0.2, 0.5, 20.0], dtype=torch.float32)
+
+        if prior_cov is not None:
+            self.prior_cov = prior_cov
+        else:
+            std = torch.tensor([0.5, 0.5, 1.0, 0.7], dtype=torch.float32)
+            self.prior_cov = torch.diag(std**2)
 
     def to_unconstrained(self, vals: torch.Tensor) -> torch.Tensor:
         """Transform constrained parameters to unconstrained space.
@@ -100,7 +122,11 @@ class SIRSimulator:
         theta: torch.Tensor,
         T: int = 100,
         N: int = 10_000,
-    ) -> torch.Tensor:
+        Ns: int = None,
+        output: str = "moments",
+        epsilon: float = 0.0,
+        **kwargs,
+    ) -> torch.Tensor | tuple:
         """Stochastic discrete-time SIR with Binomial transitions.
 
         Parameters
@@ -113,12 +139,23 @@ class SIRSimulator:
             Time horizon.
         N : int, default 10_000
             Population size.
+        Ns : int, optional
+            Not used for SIR, provided for API consistency.
+        output : str, default "moments"
+            "moments" to return summary statistics, "data" for raw trajectories.
+        epsilon : float, default 0.0
+            Fraction of contaminated samples (ignored in simulate, handled in
+            generate_observed_data).
+        **kwargs : dict
+            Additional arguments (ignored).
 
         Returns
         -------
-        torch.Tensor
-            y: (n, T) observed new cases per day.
+        torch.Tensor or tuple
+            If output == "moments", returns summary statistics of shape (n, 3).
+            If output == "data", returns simulated trajectories of shape (n, T).
         """
+        del Ns
         assert theta.dim() == 2
         n, d = theta.shape
         device = theta.device
@@ -173,7 +210,12 @@ class SIRSimulator:
                 probs = (phi / (phi + mu + 1e-8)).clamp(1e-6, 1 - 1e-6)
                 y[:, t] = NegativeBinomial(total_count=phi, probs=probs).sample()
 
-        return y
+        if output == "moments":
+            return self.summary(y, N)
+        elif output == "data":
+            return y
+
+        raise ValueError(f"Unknown output {output!r}; expected 'moments' or 'data'")
 
     def summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
         """Compute summary statistics for SIR incidence.
@@ -273,37 +315,27 @@ class SIRSimulator:
 
         return y, summary
 
-    def prior(self) -> MultivariateNormal:
+    def prior(self, num_samples: int | None = None) -> torch.Tensor | MultivariateNormal:
         """Return the Gaussian prior used in the SIR experiments.
 
         This is the prior defined in ``configs/sir.yaml`` (``prior_mean``
         and ``prior_std``), in the unconstrained parameter space
         ``(log_beta, log_gamma, logit_rho, log_I0)``.
 
-        Returns
-        -------
-        MultivariateNormal
-            Prior distribution over the 4 unconstrained parameters.
-        """
-        mean = torch.tensor([0.5, 0.2, 0.5, 20.0], dtype=torch.float32)
-        std = torch.tensor([0.5, 0.5, 1.0, 0.7], dtype=torch.float32)
-        cov = torch.diag(std**2)
-        return MultivariateNormal(loc=mean, covariance_matrix=cov)
-
-    def make_sir_prior(self, cfg: dict) -> MultivariateNormal:
-        """Create a MultivariateNormal prior for SIR parameters.
-
         Parameters
         ----------
-        cfg : dict
-            Configuration dictionary containing 'mean' and 'cov' for the prior.
+        num_samples : int or None, default None
+            If provided, returns `num_samples` samples from the prior.
+            If None, returns the MultivariateNormal distribution object.
 
         Returns
         -------
-        MultivariateNormal
-            The prior distribution.
+        torch.Tensor or MultivariateNormal
+            If `num_samples` is provided, returns a tensor of shape
+            (num_samples, 4). Otherwise, returns the prior distribution.
         """
-        mean = torch.tensor(cfg["mean"], dtype=torch.float32)
-        cov = torch.tensor(cfg["cov"], dtype=torch.float32)
-        return MultivariateNormal(mean, cov)
+        dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
+        if num_samples is not None:
+            return dist.sample((num_samples,))
+        return dist
 

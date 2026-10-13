@@ -8,7 +8,7 @@ import torch
 from torch.distributions import MultivariateNormal
 
 
-class TurinModel:
+class TurinSimulator:
     """Simulator for the Turin channel model.
 
     This class provides methods to simulate the stochastic Turin channel
@@ -23,6 +23,8 @@ class TurinModel:
         N: int = 50,
         tau0: float = 0.0,
         device: str = "cpu",
+        prior_mean: torch.Tensor | None = None,
+        prior_cov: torch.Tensor | None = None,
     ) -> None:
         """Initialize the Turin channel model simulator.
 
@@ -39,6 +41,10 @@ class TurinModel:
             Minimum delay threshold in seconds.
         device : str, default "cpu"
             Device to use ("cpu" or "cuda").
+        prior_mean : torch.Tensor, optional
+            Prior mean vector. If None, uses default values.
+        prior_cov : torch.Tensor, optional
+            Prior covariance matrix. If None, uses default values.
         """
         self.B = B
         self.Ns = Ns
@@ -46,21 +52,40 @@ class TurinModel:
         self.tau0 = tau0
         self.device = device
 
-    def prior(self) -> MultivariateNormal:
+        # Log-space prior mean and covariance
+        if prior_mean is not None:
+            self.prior_mean = prior_mean
+        else:
+            self.prior_mean = torch.tensor([-19.0, -19.0, 22.0, -22.0], dtype=torch.float32, device=self.device)
+
+        if prior_cov is not None:
+            self.prior_cov = prior_cov
+        else:
+            self.prior_cov = torch.eye(4, dtype=torch.float32, device=self.device)
+
+    def prior(self, num_samples: int | None = None) -> torch.Tensor | MultivariateNormal:
         """Return the Gaussian prior used in the Turin experiments.
 
         This is the prior defined in ``configs/turin.yaml`` (``prior_mean``
         and ``prior_cov``), in the log-space parameter vector
         ``[log(G0), log(T), log(lambda_0), log(sigma2_N)]``.
 
+        Parameters
+        ----------
+        num_samples : int or None, default None
+            If provided, returns `num_samples` samples from the prior.
+            If None, returns the MultivariateNormal distribution object.
+
         Returns
         -------
-        MultivariateNormal
-            Prior distribution over the 4 log-space parameters.
+        torch.Tensor or MultivariateNormal
+            If `num_samples` is provided, returns a tensor of shape
+            (num_samples, 4). Otherwise, returns the prior distribution.
         """
-        mean = torch.tensor([-19.0, -19.0, 22.0, -22.0], dtype=torch.float32)
-        cov = torch.eye(4, dtype=torch.float32)
-        return MultivariateNormal(loc=mean, covariance_matrix=cov)
+        dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
+        if num_samples is not None:
+            return dist.sample((num_samples,))
+        return dist
 
     def _simulate_channel(
         self, theta: torch.Tensor, epsilon: float = 0.0
@@ -177,10 +202,8 @@ class TurinModel:
     def simulate(
         self,
         theta: torch.Tensor,
-        N: int | None = None,
-        Ns: int | None = None,
-        output: str = "moments",
-        epsilon: float = 0.0,
+        T: int | None = None,
+        **kwargs,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Simulate the Turin channel model and summarize the response.
 
@@ -190,16 +213,18 @@ class TurinModel:
             Parameter vector [G0, T, lambda_0, sigma2_N] in log space,
             either 1D (broadcast to all receivers) or 2D of shape
             (n_theta, d_theta) to give each receiver its own parameters.
-        N : int, optional
-            Number of time series (receivers) to simulate. Defaults to
-            the number of rows of a batched `theta` or to `self.N`.
-        Ns : int, optional
-            Number of frequency samples. Defaults to `self.Ns`.
-        output : str, default "moments"
-            "moments" to return 3D log moment summaries, "data" for the
-            full time-domain power (dB).
-        epsilon : float, default 0.0
-            Fraction (0-1) of outlier time series to replace with pure noise.
+        T : int, optional
+            Time horizon. For the Turin simulator, this is ignored as the
+            number of samples is governed by `Ns`.
+        **kwargs
+            Additional simulation arguments. Supported:
+            - N : int, optional. Number of receivers. If None, uses `self.N`
+              or `theta.shape[0]` if theta is 2D.
+            - Ns : int, optional. Number of frequency samples. Defaults to `self.Ns`.
+            - output : str, default "moments". "moments" to return 3D log
+              moment summaries, "data" for the full time-domain power (dB).
+            - epsilon : float, default 0.0. Fraction (0-1) of outlier time
+              series to replace with pure noise.
 
         Returns
         -------
@@ -207,6 +232,11 @@ class TurinModel:
             If output == "moments", returns temporal moments of shape
             (N, K). If output == "data", returns (p_dB, outlier_indices, tau).
         """
+        N = kwargs.get("N")
+        Ns = kwargs.get("Ns")
+        output = kwargs.get("output", "moments")
+        epsilon = kwargs.get("epsilon", 0.0)
+
         nRx = (
             N
             if N is not None
@@ -216,7 +246,6 @@ class TurinModel:
             raise ValueError(
                 f"Ns must match the simulator's Ns ({self.Ns}), got {Ns}"
             )
-        del Ns
 
         Y, outlier_indices = self._simulate_channel(theta, epsilon=epsilon)
 
@@ -265,26 +294,3 @@ class TurinModel:
         x_sim = self.simulate(theta, N=n)
         return theta, x_sim
 
-    def generate_observed_data(
-        self,
-        theta_true: torch.Tensor,
-        n_obs: int,
-        epsilon: float = 0.0,
-    ) -> torch.Tensor:
-        """Generate observed data with outlier receivers.
-
-        Parameters
-        ----------
-        theta_true : torch.Tensor
-            True log-space parameters of shape (d_theta,).
-        n_obs : int
-            Number of observed receivers.
-        epsilon : float, default 0.0
-            Fraction (0-1) of outlier receivers replaced with pure noise.
-
-        Returns
-        -------
-        torch.Tensor
-            Log temporal moments of shape (n_obs, K).
-        """
-        return self.simulate(theta_true, N=n_obs, epsilon=epsilon)
