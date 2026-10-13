@@ -10,4 +10,8 @@ __all__ = [
     "SIRSimulator",
     "TurinSimulator",
     "GandKSimulator",
+    "GNKSimulator",
 ]
+
+GNKSimulator = GandKSimulator
+

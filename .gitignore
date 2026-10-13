@@ -34,3 +34,4 @@ data/
 *.patch
 AGENTS.md
 *.orig
+*.txt

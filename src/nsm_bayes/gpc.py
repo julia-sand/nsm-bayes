@@ -6,33 +6,8 @@ from scipy.stats import chi2
 from torch.func import hessian, jacrev, vmap
 from tqdm import tqdm
 
-from nsm_bayes.method import compute_posterior_case1, robust_mean_cov, w_imq_squared
-
-
-######-------Functions needed for general posterior calibration (setting the learning rate) for NSM-Bayes------#########
-def weight_function_factory_batched(name: str, x_obs: torch.Tensor, mu_hat: torch.Tensor,
-                            Sigma_inv: torch.Tensor, c: float):
-    """
-    Returns two tensors (w2_i, grad_w2_i) for all x_i in x_obs.
-    w2_i has shape (n,), grad_w2_i has shape (n, d_x).
-    """
-    n, d_x = x_obs.shape
-
-    if name.lower() == "none":
-        w2 = torch.ones(n, device=x_obs.device, dtype=x_obs.dtype)
-        grad_w2 = torch.zeros(n, d_x, device=x_obs.device, dtype=x_obs.dtype)
-        return w2, grad_w2
-
-    if name.lower() == "imq":
-        diff = (x_obs - mu_hat).detach()
-        # norm_sq: (n,)
-        norm_sq = torch.sum((diff @ Sigma_inv) * diff, dim=1)
-        denom = 1.0 + norm_sq / c + 1e-12 
-        w2 = 1.0 / (denom ** 2) 
-        grad_w2 = - (4.0 / c) * (1.0 / (denom ** 3)).unsqueeze(-1) * (diff @ Sigma_inv.T) 
-        return w2, grad_w2
-
-    raise ValueError(f"Unknown weight_type={name}")
+from nsm_bayes.method import compute_posterior_case1, robust_mean_cov, w_imq_squared, w_imq_squared_grad
+from nsm_bayes.utils.weightfuns import weight_function_factory_batched
 
 def cache_perx_sm_losses(
     theta_samples: torch.Tensor,           # (M, d_theta)
@@ -207,7 +182,7 @@ def calibrate_beta(
 
     # Precompute IMQ weights (or "none") once
     w2, grad_w2 = weight_function_factory_batched(weight_type, x_obs, mu_hat, Sigma_inv, c)
-
+    
     # Cache per-x losses for all base samples, plus base average loss
     # ell:   (M, n)   per-x losses
     # L_orig:(M,)     mean loss on *original* data for each theta sample
@@ -336,8 +311,6 @@ def compute_theta_hat_true_case1(
         that T_phi produces.
     """
 
-    device = x_obs.device
-    dtype = x_obs.dtype
 
     # ---------- 1. A = sum_i w(x_i)^2 * J_T(x_i)^T J_T(x_i) ----------
     def get_cov_term_single(xi):
@@ -409,12 +382,8 @@ def compute_theta_hat_true_case1(
 def calibrate_beta_gpc(
     x_obs: torch.Tensor,
     model,
-    #T_phi_net: torch.nn.Module,
-    #b_phi_net: torch.nn.Module,
     prior_mean: torch.Tensor,
     prior_cov: torch.Tensor,
-    #standardizer_x,
-    #standardizer_theta,
     # --- GPC Hyperparameters ---
     initial_beta: float = 0.1,
     target_coverage: float = 0.95,
@@ -509,7 +478,7 @@ def calibrate_beta_gpc(
             c_boot = 1.
 
             mu_boot_norm, Sigma_boot_norm = compute_posterior_case1(
-                x_boot_normalized, model.T_phi_net, model.b_phi_net, beta,
+                x_boot_normalized, model, beta,
                 prior_mean_normalized, prior_cov_normalized,
                 w_imq_squared, mu_hat_boot, Sigma_inv_boot, c_boot
             )

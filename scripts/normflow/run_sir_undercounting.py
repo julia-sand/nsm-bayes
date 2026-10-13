@@ -6,12 +6,12 @@ import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
+from nsm_bayes.gpc import calibrate_beta
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     compute_posterior_case1,
     robust_mean_cov,
-    w_imq_squared,
+    imq_weight,
 )
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow

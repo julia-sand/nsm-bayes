@@ -159,3 +159,24 @@ class GandKSimulator:
         term_k = (1 + z**2) ** k
         x = A + B * (1 + 0.8 * term_g) * term_k * z
         return x.squeeze()
+
+
+    def prior(self, num_samples: int | None = None) -> torch.Tensor | MultivariateNormal:
+        """Return the Gaussian prior used in the gnk experiments.
+
+        Parameters
+        ----------
+        num_samples : int or None, default None
+            If provided, returns `num_samples` samples from the prior.
+            If None, returns the MultivariateNormal distribution object.
+
+        Returns
+        -------
+        torch.Tensor or MultivariateNormal
+            If `num_samples` is provided, returns a tensor of shape
+            (num_samples, 4). Otherwise, returns the prior distribution.
+        """
+        dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
+        if num_samples is not None:
+            return dist.sample((num_samples,))
+        return dist

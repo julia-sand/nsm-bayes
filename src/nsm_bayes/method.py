@@ -3,88 +3,79 @@ import numpy as np
 import torch
 from sklearn.covariance import MinCovDet
 from torch.func import grad as fgrad
-from torch.func import hessian, jacrev, jvp, vmap
+from torch.func import hessian, jacrev,jacfwd, jvp, vmap
+
+from nsm_bayes.utils.weightfuns import imq_weight_grad
+
+from nsm_bayes.utils.weightfuns import weight_function_factory
+
+def safe_cholesky(Sigma: torch.Tensor, max_tries: int = 6) -> torch.Tensor:
+    """Cholesky factor of Sigma, 
+    Cheaper to factorise first, then check whether it is non-invertible.
+    Add jitter only if needed 
+    """
+    L, info = torch.linalg.cholesky_ex(Sigma)
+    if info == 0:
+        return L
+    d = Sigma.shape[-1]
+    eye = torch.eye(d, device=Sigma.device, dtype=Sigma.dtype)
+    scale = Sigma.diagonal().mean().abs().clamp_min(1e-12)   # jitter relative to data scale
+    jitter = 1e-8 * scale
+    for _ in range(max_tries):
+        L, info = torch.linalg.cholesky_ex(Sigma + jitter * eye)
+        if info == 0:
+            return L
+        jitter *= 10
+    raise RuntimeError(f"Covariance not positive definite even with jitter {jitter:.2e}")
+
+
+def sigma_inverse(Sigma_hat):
+    if Sigma_hat.numel() == 1:   # scalar variance (d_x = 1)
+        var = Sigma_hat.reshape(1, 1)
+        if not torch.isfinite(var).all():
+            raise ValueError(f"Variance estimate is not finite ({var.item()}); check the input data.")
+        if var.item() <= 0:
+            raise ValueError(
+                f"Variance estimate is {var.item():.3e} (n={x.shape[0]}, robust={robust}). "
+                "Data may be constant or the outlier proportion too high."
+            )
+        return 1.0 / var
+
+    L = safe_cholesky(Sigma_hat)
+    return torch.cholesky_inverse(L)
+
 
 # ===========================================================================================
 # PART 0: Common functions needed for the proposed neural score-matching Bayes method
 # ===========================================================================================
 
-def w_imq_squared(x, mu_hat, Sigma_inv, c):
+
+def sample_mean_and_covariance(x_obs: torch.Tensor):
     """
-    Computes w_IMQ^2(x) for a batch of x.
-    Inputs:
-    - x: (n, d_x) torch tensor, where n is the number of observations.
-    - mu_hat: (d_x,) robust mean
-    - Sigma_inv: (d_x, d_x) robust covariance inverse
-    - c: scalar hyperparameter
+    Compute the sample mean and (unbiased) sample covariance of x_obs.
+
+    Args:
+        x_obs (Tensor): shape (n, d)
+
     Returns:
-    - w2: (n,) tensor containing w_IMQ(x_i)^2 for each observation.
-    """ 
-    diff = x - mu_hat
-    norm_sq = torch.sum((diff @ Sigma_inv) * diff, dim=1)
-    
-    denom = 1 + norm_sq / c + 1e-12
-    w2 = 1.0 / (denom)**2
-
-    return w2
-
-def weight_function_factory(name, mu_hat, Sigma_inv, c=1.0, zeta: float = 1.0):
+        mean (Tensor): shape (d,)
+        cov  (Tensor): shape (d, d)
     """
-    Returns a function (x) -> (w2, grad_w2)
-    for the chosen weighting scheme.
+    if x_obs.ndim != 2:
+        raise ValueError("x_obs must have shape (n, d)")
 
-    IMQ weight:
-        w_zeta(x) = (1 + ||x-mu||_{Sigma_inv}^2 / c)^(-1/zeta)
-        w2        = w_zeta(x)^2
-        grad_w2   = ∇_x w2
+    n = x_obs.shape[0]
 
-    Default: zeta=1.0.
-    """
-    # make sure scalar-like values behave nicely
-    if torch.is_tensor(c):
-        c_t = c
-    else:
-        c_t = torch.as_tensor(c, dtype=mu_hat.dtype, device=mu_hat.device)
+    # Sample mean
+    mean = x_obs.mean(dim=0)
 
-    if torch.is_tensor(zeta):
-        zeta_t = zeta
-    else:
-        zeta_t = torch.as_tensor(zeta, dtype=mu_hat.dtype, device=mu_hat.device)
+    # Centered data
+    x_centered = x_obs - mean
 
-    def imq_weight(x):
+    # Sample covariance (unbiased, divide by n-1)
+    cov = (x_centered.T @ x_centered) / (n - 1)
 
-        diff = (x - mu_hat).detach()  # (d_x,)
-        s = diff @ Sigma_inv @ diff
-        denom = 1.0 + s / c_t + 1e-12
-
-        w2 = denom.pow(-2.0 / zeta_t)
-        grad_w2 = -(4.0 / (zeta_t * c_t)) * denom.pow(-(2.0 / zeta_t + 1.0)) * (Sigma_inv @ diff)
-
-        return w2, grad_w2
-
-    def huber_weight(x):
-        diff = (x - mu_hat).detach()
-        norm = torch.sqrt((diff @ Sigma_inv @ diff) + 1e-12)
-        if norm <= c_t:
-            w = torch.tensor(1.0, device=x.device, dtype=x.dtype)
-            grad_w2 = torch.zeros_like(diff)
-        else:
-            w = c_t / norm
-            grad_w2 = torch.zeros_like(diff)
-        return w**2, grad_w2
-
-    def unweighted(x):
-        w2 = torch.tensor(1.0, device=x.device, dtype=x.dtype)
-        grad_w2 = torch.zeros_like(x)
-        return w2, grad_w2
-
-    weights = {
-        "imq": imq_weight,
-        "huber": huber_weight,
-        "none": unweighted,
-    }
-    return weights[name.lower()]
-
+    return mean, cov
 
 def median_heuristic(x):
     dists = torch.cdist(x, x)
@@ -393,78 +384,37 @@ def calculate_training_loss(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
     return losses.mean()
 
 
-# --- Function to compute unnormalized log-probability q_phi(x|theta) for NSM-Bayes-conj ---
-def compute_unnormalized_log_prob_case1(x,
-                                  theta,
-                                  T_phi: torch.nn.Module,
-                                  b_phi: torch.nn.Module) -> torch.Tensor:
-    """
-    Computes the unnormalized log-probability, log(q_phi(x|theta)) + log(Z(theta)).
-    """
-    # Ensure inputs are PyTorch tensors.
-    if not isinstance(x, torch.Tensor):
-        x = torch.as_tensor(x)
-    if not isinstance(theta, torch.Tensor):
-        theta = torch.as_tensor(theta)
-
-    # Get the expected dtype from the model's parameters and cast inputs.
-    model_dtype = next(T_phi.parameters()).dtype
-    x = x.to(dtype=model_dtype)
-    theta = theta.to(dtype=model_dtype)
-
-    if x.dim() == 1:
-        # If x is 1D (e.g., shape [1000]), reshape it to (1000, 1).
-        x = x.unsqueeze(1)
-
-    # Handle theta's shape to match the batch size of x.
-    if theta.dim() == 1:
-        theta = theta.expand(x.shape[0], -1) # Expand to (batch_size, d_theta)
-
-    # Compute the two parts of the log-likelihood
-    T_x = T_phi(x)
-    b_x = b_phi(x)
-
-    # Calculate the unnormalized log-probability for the batch
-    log_likelihood_term = torch.einsum('bi,bi->b', T_x, theta)
-    base_measure_term = b_x.squeeze(-1)
-
-    result = log_likelihood_term + base_measure_term
-    
-    return result
-
-
 #######----Function to compute posterior precision matrix for NSM-Bayes-conj----######
 def compute_posterior_precision_case1(
-    x_obs, T_phi, beta, prior_cov_inv, w_imq_squared_fn, mu_hat_obs, Sigma_inv_obs, c
+    x_obs, model, beta, prior_cov_inv, imq_weight_fn, mu_hat_obs, Sigma_inv_obs, c
 ):
     """
     Computes the posterior precision matrix (inverse covariance) for the model.
 
     """
-    
+
     # Define the calculation for a single data point
     def get_cov_term_single(xi):
         # Create a wrapper for T_phi that accepts a vector
-        T_phi_wrapped = lambda x_vec: T_phi(x_vec.unsqueeze(0)).squeeze(0)
+        T_phi_wrapped = lambda x_vec: model.T_phi(x_vec.unsqueeze(0)).squeeze(0)
         jac_T = jacrev(T_phi_wrapped)(xi) # shape (d_theta, d_x)
         return jac_T @ jac_T.T
 
     # Vectorize the calculation over all observations
     batched_cov_terms = vmap(get_cov_term_single)(x_obs) # shape: (n, d_theta, d_theta)
-    
+
     # Apply weights and sum
-    weights = w_imq_squared_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1, 1)
+    weights = imq_weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1, 1)
 
     sum_term = (weights * batched_cov_terms).sum(dim=0)
-    
+
     # Assemble the final precision matrix
     Sigma_n_inv = prior_cov_inv + 2 * beta * sum_term
-    
+
     return Sigma_n_inv
 
-########----Function to compute posterior mean and covariance for NSM-Bayes-conj----######
 def compute_posterior_case1(
-    x_obs, T_phi, b_phi, beta, prior_mean, prior_cov, w_imq_squared_fn, mu_hat_obs, Sigma_inv_obs, c
+    x_obs, model, beta, prior_mean, prior_cov, imq_weight_fn, mu_hat_obs, Sigma_inv_obs, c
 ):
     """
     Computes the posterior mean and covariance for the neural exponential family model.
@@ -479,15 +429,15 @@ def compute_posterior_case1(
     
     # 1. Compute the posterior precision matrix
     Sigma_n_inv = compute_posterior_precision_case1(
-        x_obs, T_phi, beta, prior_cov_inv, w_imq_squared_fn, mu_hat_obs, Sigma_inv_obs, c
+        x_obs, model, beta, prior_cov_inv, imq_weight_fn, mu_hat_obs, Sigma_inv_obs, c
     )
 
     # --- 2. Calculate terms needed for the posterior mean ---
 
     # --- 2a. Vectorized Non-Divergence Term (h_n) ---
     def get_non_div_term_single(xi):
-        T_phi_wrapped = lambda x_vec: T_phi(x_vec.unsqueeze(0)).squeeze(0)
-        b_phi_wrapped = lambda x_vec: b_phi(x_vec.unsqueeze(0)).squeeze()
+        T_phi_wrapped = lambda x_vec: model.T_phi(x_vec.unsqueeze(0)).squeeze(0)
+        b_phi_wrapped = lambda x_vec: model.b_phi(x_vec.unsqueeze(0)).squeeze()
         
         jac_T = jacrev(T_phi_wrapped)(xi) # shape: (d_theta, d_x)
         jac_b = jacrev(b_phi_wrapped)(xi) # shape: (d_x,)
@@ -495,24 +445,9 @@ def compute_posterior_case1(
         return jac_T @ jac_b
 
     batched_non_div_terms = vmap(get_non_div_term_single)(x_obs)
-    weights_h = w_imq_squared_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1)
+    weights_h = imq_weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1)
     term_non_div = (weights_h * batched_non_div_terms).sum(dim=0)
 
-    # --- 2b. Vectorized Divergence Term (D_n) ---
-    def get_div_term_single(xi):
-        def divergence_field_fn(x_vec):
-            T_phi_wrapped = lambda z: T_phi(z.unsqueeze(0)).squeeze(0)
-            w2_local = w_imq_squared_fn(x_vec.unsqueeze(0), mu_hat_obs, Sigma_inv_obs, c).squeeze()
-            jac_T_local = jacrev(T_phi_wrapped)(x_vec) # shape: (d_theta, d_x)
-            
-            # The field is a matrix of shape (d_x, d_theta) whose columns are vector fields
-            return w2_local * jac_T_local.T
-
-        # Jacobian of the field will have shape (d_x, d_theta, d_x)
-        jac_of_field = jacrev(divergence_field_fn)(xi)
-        # The divergence of the k-th column is the trace of its Jacobian matrix.
-        divergence = jac_of_field.diagonal(offset=0, dim1=0, dim2=2).sum(dim=1)
-        return divergence
 
     batched_divergences = vmap(get_div_term_single)(x_obs)
     term_div = batched_divergences.sum(dim=0)
@@ -533,3 +468,34 @@ def compute_posterior_case1(
     Sigma_n = torch.cholesky_inverse(L)
     
     return mu_n, Sigma_n
+
+def jacobian_with_spare(xi,model):
+    """The hessian is computed by jacfwd, but it first 
+    computes the jacobian. 
+    this auxiliary function returns a spare copy so that it can be reused"""
+    t_phi_wrapped = lambda x: model.T_phi(x.unsqueeze(0)).squeeze(0)
+
+    J = jacrev(t_phi_wrapped)(xi)
+    
+    return J,J
+
+
+# --- 2b. Vectorized Divergence Term (D_n) 
+def get_div_term_single(xi,model):
+
+    # 1. Compute Laplacian of T_phi: Tr(Hess(T_phi))
+    # T_phi_wrapped: (d_x) -> (d_theta)
+    # Hessian: (d_theta, d_x, d_x)
+    hess_T, jac_T = jacfwd(jacobian_with_spare, has_aux=True)(xi,model)   # (d_θ, d_x, d_x), (d_θ, d_x)
+    laplacian_T = torch.diagonal(hess_T, dim1=1, dim2=2).sum(dim=1) # shape: (d_theta,)
+
+    # 3. Compute weight and analytic gradient at xi
+    w2 = imq_weight(xi.unsqueeze(0), mu_hat_obs, Sigma_inv_obs, c).squeeze()   
+    grad_w2 = imq_weight_grad(xi.unsqueeze(0), mu_hat_obs, Sigma_inv_obs, c).squeeze() # shape: (d_x,)
+
+    # grad_w2: (d_x,)
+    # jac_T: (d_theta, d_x)
+    # laplacian_T: (d_theta,)
+    divergence = grad_w2 @ jac_T.T + w2 * laplacian_T
+    
+    return divergence

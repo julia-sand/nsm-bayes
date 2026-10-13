@@ -1,4 +1,3 @@
-import csv
 import pickle
 import random
 import time
@@ -9,17 +8,13 @@ import numpy as np
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
+from nsm_bayes.gpc import calibrate_beta_gpc
 
 from nsm_bayes.models.conjugate import ConjugateModel
-from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.add_noise import add_outliers_by_proportion
 from nsm_bayes.simulators.benchmark_simulators.simulators import (
     GandKSimulator,
 )
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-
-from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
 
 def _run(cfg: DictConfig, save_dir: Path):
     #####------Load config values-----######
@@ -59,8 +54,10 @@ def _run(cfg: DictConfig, save_dir: Path):
         with open(save_dir/ f"x_sim_{ind}.pkl", "wb") as f:
             pickle.dump(x_sim, f)
         
-        #######-------Generate observed data-----######
+        #Generate observations from the simulator
         x_obs = sim.simulate(theta_true, n=n_obs).unsqueeze(-1)
+
+        #Generate 'real data', by adding outliers
         x_obs_mis, outlier_indices = add_outliers_by_proportion(x_obs, epsilon, outlier_values) # Adding outliers
         
         # Save the observed data without outliers
@@ -70,23 +67,27 @@ def _run(cfg: DictConfig, save_dir: Path):
         # Save the observed data with outliers
         with open(save_dir/ f"x_obs_mis_{ind}.pkl", "wb") as f:
             pickle.dump(x_obs_mis, f)
+        
         # Save the outlier indices
         with open(save_dir/ f"outlier_indices_{ind}.pkl", "wb") as f:
             pickle.dump(outlier_indices, f)
+
         start_time = time.perf_counter() # Record the start time
-        
         
         model = ConjugateModel(d_x=d_x, d_theta=d_theta, hidden_dim=cfg.hidden_dim)
         start_time = time.perf_counter() # Record the start time
-        # Fit the standardizers and train the networks (score matching)
-        training_history = model.fit(x_sim=x_sim, theta_sim=theta)
-        end_time = time.perf_counter() # Record the end time
+        
+        # Train the model on the true data 
+        model.fit(x_sim=x_sim, theta_sim=theta)
+        
+        end_time = time.perf_counter() # Record the end time of the training
+        
+        # Save the time taken for training
         cost_sm_case1_train = end_time - start_time
-        # Save the time 
         with open(save_dir/ f"cost_sm_case1_train_{ind}.pkl", "wb") as f:
             pickle.dump(cost_sm_case1_train, f)
         
-        # Save the trained neural nets
+        # Save the trained neural net
         model.save_checkpoint(cfg, save_dir, ind)
         
         #########-----Compute conjugate posterior (Case 1)-------#######
@@ -107,7 +108,7 @@ def _run(cfg: DictConfig, save_dir: Path):
 
         mu_n, Sigma_n = model.calibrated_posterior(
             x_obs_mis, 
-            model, 
+            calibrated_beta, 
             prior_mean, 
             prior_cov, 
             cfg.robust_flag

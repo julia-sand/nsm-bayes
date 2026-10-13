@@ -3,6 +3,48 @@ import torch
 from torch.distributions import Binomial, StudentT
 
 
+def add_outliers_by_proportion(data, epsilon, outlier_values):
+    """
+    Randomly replaces a proportion `epsilon` of observations with outliers.
+
+    Args:
+        data (torch.Tensor): The original dataset of shape (n_obs, d_x).
+        epsilon (float): The proportion of data to replace (e.g., 0.1 for 10%).
+        outlier_values (list or tuple): A list of values to sample outliers from
+                                        (e.g., [10.0, -10.0]).
+
+    Returns:
+        tuple: A tuple containing:
+            - modified_data (torch.Tensor): A new tensor with outliers.
+            - outlier_indices (torch.Tensor): A tensor of the indices that were replaced.
+    """
+    modified_data = data.clone()
+    
+    n_obs, d_x = data.shape
+    
+    # Calculate the number of outliers to add
+    num_outliers = int(torch.floor(epsilon * n_obs))
+    
+    if num_outliers == 0:
+        print("Warning: Epsilon is too small to add any outliers for this dataset size.")
+        return modified_data, torch.tensor([])
+        
+    all_indices = torch.randperm(n_obs)
+    outlier_indices = all_indices[:num_outliers]
+    
+    for idx in outlier_indices:
+        # Randomly choose one of the provided outlier values
+        random_outlier_value = outlier_values[torch.randint(0,len(outlier_values),size=(1,)).item()]
+        
+        # Create the outlier tensor
+        outlier_tensor = torch.full((d_x,), fill_value=float(random_outlier_value), 
+                                    dtype=data.dtype, device=data.device)
+        
+        # Replace the data at the chosen index
+        modified_data[idx, :] += outlier_tensor 
+        
+    return modified_data, outlier_indices
+
 def add_student_t_noise(
     x_obs: torch.Tensor,
     epsilon: float,

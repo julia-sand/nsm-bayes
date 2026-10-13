@@ -11,12 +11,12 @@ from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     robust_mean_cov,
-    w_imq_squared,
+    imq_weight,
 )
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import run_mcmc
+from nsm_bayes.models.general.normflow import run_mcmc
 
 
 def _run(cfg: DictConfig, save_dir: Path):

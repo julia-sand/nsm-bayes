@@ -6,19 +6,11 @@ import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.method import (
-    ScoreMatchingLogPosterior,
-    compute_posterior_case1,
-    robust_mean_cov,
-    w_imq_squared,
-)
+from nsm_bayes.gpc import calibrate_beta_gpc
+
 from nsm_bayes.models.conjugate import ConjugateModel
-from nsm_bayes.models.general import make_nle_logprob, train_normflow
 from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
 
 
 def _run(cfg: DictConfig, save_dir: Path):
@@ -109,7 +101,7 @@ def _run(cfg: DictConfig, save_dir: Path):
         )
 
         mu_n, Sigma_n = model.calibrated_posterior(x_obs_mis,
-                                               model, 
+                                               calibrated_beta, 
                                                prior_mean, 
                                                prior_cov,
                                                cfg.robust_flag

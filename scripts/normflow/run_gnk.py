@@ -14,7 +14,7 @@ from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     compute_posterior_case1,
     robust_mean_cov,
-    w_imq_squared,
+    imq_weight,
 )
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
@@ -24,7 +24,8 @@ from nsm_bayes.simulators.benchmark_simulators.simulators import (
 )
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 
-from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
+from nsm_bayes.utils import sample_mean_and_covariance
+from nsm_bayes.models.general.normflow import run_mcmc
 
 def _run(cfg: DictConfig, save_dir: Path):
     #####------Load config values-----######

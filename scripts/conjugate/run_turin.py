@@ -11,7 +11,7 @@ from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     robust_mean_cov,
-    w_imq_squared,
+    imq_weight,
 )
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
@@ -152,12 +152,12 @@ def _run(cfg: DictConfig, save_dir: Path):
         )
         
         mu_n, Sigma_n = model.calibrated_posterior(
-            x_obs_mis, 
-            model, 
-            prior_mean, 
-            prior_cov, 
-            cfg.robust_flag
-        )
+                                        x_obs_mis, 
+                                        calibrated_beta, 
+                                        prior_mean, 
+                                        prior_cov, 
+                                        cfg.robust_flag
+                                    )
         
         end_time = time.perf_counter() # Record the end time
         cost_sm_case1_posterior = (end_time - start_time)

@@ -6,7 +6,7 @@ from nsm_bayes.models.conjugate.bphi_net import BphiNet
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
 from nsm_bayes.method import sigma_inverse, robust_mean_cov, compute_posterior_case1,sample_mean_and_covariance
-from nsm_bayes.utils.weightfuns import w_imq_squared
+from nsm_bayes.utils.weightfuns import imq_weight
 
 class TorchStandardizer(nn.Module):
     """Per-dimension (x - mean) / std with statistics stored as buffers, so they are
@@ -92,7 +92,7 @@ class ConjugateModel(nn.Module):
         mu_n_normalized, Sigma_n_normalized = compute_posterior_case1(
                     x_n, self, beta,
                     self.standardizer_theta(prior_mean), prior_cov / torch.outer(s, s),
-                    w_imq_squared, mu_hat_obs, Sigma_inv, c)
+                    imq_weight, mu_hat_obs, Sigma_inv, c)
         mu_n = mu_n_normalized * s + m
         Sigma_n = Sigma_n_normalized * s  
         return mu_n, Sigma_n
