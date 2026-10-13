@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from scripts import run_gnk
+from scripts.normflow import run_gnk
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 

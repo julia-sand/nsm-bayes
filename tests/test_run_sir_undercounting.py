@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
-from scripts import run_sir_undercounting
+from scripts.normflow import run_sir_undercounting
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 

@@ -177,83 +177,15 @@ def _run(cfg: DictConfig, save_dir: Path):
             pickle.dump(history_general, f)
         with open(save_dir / f"beta_general_{ind}.pkl", "wb") as f:
             pickle.dump(beta, f)
-        model = ConjugateModel(d_x=d_x, d_theta=d_theta, hidden_dim=cfg.hidden_dim)
-        start_time = time.perf_counter() # Record the start time
-        # Fit the standardizers and train the networks (score matching)
-        training_history = model.fit(x_sim=x_sim, theta_sim=theta)
-        end_time = time.perf_counter() # Record the end time
-        cost_sm_case1_train = end_time - start_time
-        # Save the time 
-        with open(save_dir/ f"cost_sm_case1_train_{ind}.pkl", "wb") as f:
-            pickle.dump(cost_sm_case1_train, f)
-        T_phi_net = model.T_phi
-        b_phi_net = model.b_phi
-        standardizer_x = model.standardizer_x
-        standardizer_theta = model.standardizer_theta
-        # Save the trained neural nets
-        torch.save({
-            "T_phi_state_dict": model.T_phi.state_dict(),
-            "B_phi_state_dict": model.b_phi.state_dict(),
-            "standardizer_x_state_dict": model.standardizer_x.state_dict(),
-            "standardizer_theta_state_dict": model.standardizer_theta.state_dict(),
-            "config": dict(cfg),
-        },
-            save_dir / f"case1_nets_{ind}.pt"
-        )
-        #########-----Compute conjugate posterior (Case 1)-------#######
-        start_time = time.perf_counter() # Record the start time
-        x_obs_normalized = standardizer_x(x_obs_mis) # Normalize the observed data
-        prior_mean_normalized = standardizer_theta(prior_mean) # Normalize the prior mean
-        scales = standardizer_theta.std
-        prior_cov_normalized = prior_cov / torch.outer(scales, scales) # Normalize the prior covariance
-        if not cfg.robust_flag:
-            mu_hat_obs, Sigma_hat_obs = sample_mean_and_covariance(x_obs_mis)
-        else:
-            mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
-        Sigma_inv_obs = torch.linalg.inv(Sigma_hat_obs + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
-        c_case1 = 1.
-        # Calibrating beta
-        calibrated_beta, gpc_history = calibrate_beta_gpc(
-            x_obs_mis,
-            model,
-            prior_mean=prior_mean,
-            prior_cov=prior_cov,
-            #standardizer_x=standardizer_x,
-            #standardizer_theta=standardizer_theta,
-            initial_beta=cfg.beta_base_case1,        
-            target_coverage=1.0 - cfg.alpha,
-            num_iterations=cfg.T,        # Number of updates to beta
-            num_bootstraps=cfg.B,        # B, number of samples to estimate coverage
-            learning_rate_fn = lambda t: 10.0 / (t + 10.),
-            beta_min = cfg.beta_min_case1
-        )
-        mu_n_normalized, Sigma_n_normalized = compute_posterior_case1(
-            x_obs_normalized, T_phi_net, b_phi_net, calibrated_beta, prior_mean_normalized, prior_cov_normalized, w_imq_squared, mu_hat_obs, Sigma_inv_obs, c_case1)
-        # Inverse-transform the posterior mean and covariance to the original scale
-        #mu_n = mu_n_normalized * standardizer_theta.std + standardizer_theta.mean
-        mu_n = model.standardizer_theta.inverse(mu_n_normalized)
-        scales = standardizer_theta.std
-        Sigma_n = Sigma_n_normalized * torch.outer(scales, scales)
-        end_time = time.perf_counter() # Record the end time
-        cost_sm_case1_posterior = (end_time - start_time) 
-        # Save the posterior mean 
-        with open(save_dir/ f"posterior_mean_case1_{ind}.pkl", "wb") as f:
-            pickle.dump(mu_n, f)
-        # Save the posterior covariance
-        with open(save_dir/ f"posterior_covariance_case1_{ind}.pkl", "wb") as f:
-            pickle.dump(Sigma_n, f)
-        with open(save_dir/ f"gpc_history_case1_{ind}.pkl", "wb") as f:
-            pickle.dump(gpc_history, f)
-        with open(save_dir / f"beta_case1_{ind}.pkl", "wb") as f:
-            pickle.dump(calibrated_beta, f)
-        # Save the time 
-        with open(save_dir/ f"cost_sm_case1_posterior_{ind}.pkl", "wb") as f:
-            pickle.dump(cost_sm_case1_posterior, f)
+        
         print("Iteration number: ", ind)
-if __name__ == "__main__":
-    run_sir_undercounting() 
+
 @hydra.main(version_base=None, config_path="../configs", config_name="sir_undercounting")
 def run_sir_undercounting(cfg: DictConfig):
     """Hydra entry point for the run_sir_undercounting experiment."""
     save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
     _run(cfg=cfg, save_dir=save_dir)
+
+if __name__ == "__main__":
+    
+    run_sir_undercounting() 

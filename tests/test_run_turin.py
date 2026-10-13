@@ -12,7 +12,7 @@ import torch
 from omegaconf import OmegaConf
 
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
-from scripts import run_turin
+from scripts.normflow import run_turin
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
