@@ -162,87 +162,6 @@ def bootstrap_coverage_indicator(
     return int(d2_hat.item() <= thresh.item())
 
 
-def compute_theta_hat_true_general(
-    x_obs: torch.Tensor,                       # (n, d_x)
-    q_phi_log_prob,                            # fn (x_batch, theta_batch) -> log prob
-    w2: torch.Tensor,                          # (n,)
-    grad_w2: torch.Tensor,                     # (n, d_x)
-    theta_init: torch.Tensor,                  # (d_theta,), starting point
-    num_steps: int = 200,
-    lr: float = 1e-2,
-    verbose: bool = False,
-) -> torch.Tensor:
-    """
-    Compute the NSM-only minimiser theta_hat_true for NSM-Bayes:
-
-        theta_hat_true = argmin_theta L_NSM(theta; x_obs)
-
-    using gradient-based optimisation.
-
-    Args
-    ----
-    x_obs      : (n, d_x) observed data.
-    q_phi_log_prob : function (x, theta) -> log q_phi(x | theta), batch-safe.
-    w2, grad_w2   : outputs of weight_function_factory_batched (n,), (n, d_x).
-    theta_init    : initial guess for theta (e.g. posterior mean at beta_base).
-    num_steps     : number of optimisation steps.
-    lr            : learning rate for Adam.
-    verbose       : if True, prints loss occasionally.
-
-    Returns
-    -------
-    theta_hat_true : (d_theta,) tensor (same space/scale as theta_init).
-    """
-
-    device = x_obs.device
-    dtype  = x_obs.dtype
-    n, d_x = x_obs.shape
-    d_theta = theta_init.shape[0]
-
-    theta = theta_init.clone().detach().to(device=device, dtype=dtype)
-    theta.requires_grad_(True)
-
-    optimizer = torch.optim.Adam([theta], lr=lr)
-
-    def nsm_loss_current_theta():
-        # per-x NSM loss, same structure as in cache_perx_sm_losses
-        def per_x_loss_for_theta(xi, w2_i, grad_w2_i):
-            # log q(x | theta) for single xi, current theta
-            log_q_fn = lambda x_vec: q_phi_log_prob(
-                x_vec.unsqueeze(0),
-                theta.unsqueeze(0)
-            ).sum()
-
-            score = jacrev(log_q_fn)(xi)      # (d_x,)
-            hess  = hessian(log_q_fn)(xi)     # (d_x,d_x) or scalar
-
-            term1 = w2_i * (score @ score)
-            term2 = 2.0 * grad_w2_i @ score
-            if hess.ndim == 0:
-                term3 = 2.0 * w2_i * hess
-            else:
-                term3 = 2.0 * w2_i * torch.trace(hess)
-            return term1 + term2 + term3
-
-        # vectorise over x
-        losses = vmap(
-            per_x_loss_for_theta,
-            in_dims=(0, 0, 0)
-        )(x_obs, w2, grad_w2)  # (n,)
-
-        return losses.mean()
-
-    for step in range(num_steps):
-        optimizer.zero_grad()
-        loss = nsm_loss_current_theta()
-        loss.backward()
-        optimizer.step()
-
-        if verbose and (step % 20 == 0 or step == num_steps - 1):
-            print(f"[theta_hat optimisation] step {step:4d} | L_NSM = {loss.item():.4f}")
-    print("Estimated theta true: ", theta)
-    return theta.detach()
-
 def calibrate_beta(
     theta_samples_base: torch.Tensor,   # (M, d) samples drawn at beta_base on original data
     beta_base: float,
@@ -486,14 +405,16 @@ def compute_theta_hat_true_case1(
 
     return theta_hat_true
 
+@torch.no_grad()
 def calibrate_beta_gpc(
     x_obs: torch.Tensor,
-    T_phi_net: torch.nn.Module,
-    b_phi_net: torch.nn.Module,
+    model,
+    #T_phi_net: torch.nn.Module,
+    #b_phi_net: torch.nn.Module,
     prior_mean: torch.Tensor,
     prior_cov: torch.Tensor,
-    standardizer_x,
-    standardizer_theta,
+    #standardizer_x,
+    #standardizer_theta,
     # --- GPC Hyperparameters ---
     initial_beta: float = 0.1,
     target_coverage: float = 0.95,
@@ -530,12 +451,12 @@ def calibrate_beta_gpc(
     n_obs = x_obs.shape[0]
 
     # --- Pre-calculate normalized prior parameters ---
-    prior_mean_normalized = standardizer_theta(prior_mean)
-    scales = standardizer_theta.std
+    prior_mean_normalized = model.standardizer_theta(prior_mean)
+    scales = model.standardizer_theta.std
     prior_cov_normalized = prior_cov / torch.outer(scales, scales)
 
     # --- Step 0: Establish the "Ground Truth" Parameter for the Bootstrap ---
-    x_obs_normalized = standardizer_x(x_obs)
+    x_obs_normalized = model.standardizer_x(x_obs)
     mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
     Sigma_inv_obs = torch.linalg.inv(
         Sigma_hat_obs + 1e-6 * torch.eye(x_obs.shape[1], device=x_obs.device, dtype=x_obs.dtype)
@@ -545,8 +466,8 @@ def calibrate_beta_gpc(
     # NSM-only minimiser (in normalized theta space)
     theta_hat_norm_true = compute_theta_hat_true_case1(
         x_obs_normalized,
-        T_phi_net,
-        b_phi_net,
+        model.T_phi_net,
+        model.b_phi_net,
         w_imq_squared,
         mu_hat_obs,
         Sigma_inv_obs,
@@ -554,7 +475,7 @@ def calibrate_beta_gpc(
     )
     
     # Transform back to original theta scale
-    theta_hat_true = theta_hat_norm_true * scales + standardizer_theta.mean
+    theta_hat_true = theta_hat_norm_true * scales + model.standardizer_theta.mean
     print("Estimated true theta: ", theta_hat_true.detach())
     # --- Start the Iterative Calibration Process ---
     beta = initial_beta
@@ -580,7 +501,7 @@ def calibrate_beta_gpc(
             x_boot = x_obs[indices]
 
             # b. Compute posterior for the bootstrap sample using the current beta
-            x_boot_normalized = standardizer_x(x_boot)
+            x_boot_normalized = model.standardizer_x(x_boot)
             mu_hat_boot, Sigma_hat_boot = robust_mean_cov(x_boot_normalized)
             Sigma_inv_boot = torch.linalg.inv(
                 Sigma_hat_boot + 1e-6 * torch.eye(x_boot.shape[1], device=x_obs.device, dtype=x_obs.dtype)
@@ -588,13 +509,13 @@ def calibrate_beta_gpc(
             c_boot = 1.
 
             mu_boot_norm, Sigma_boot_norm = compute_posterior_case1(
-                x_boot_normalized, T_phi_net, b_phi_net, beta,
+                x_boot_normalized, model.T_phi_net, model.b_phi_net, beta,
                 prior_mean_normalized, prior_cov_normalized,
                 w_imq_squared, mu_hat_boot, Sigma_inv_boot, c_boot
             )
 
             # c. Construct credible region (by un-normalizing) and check coverage
-            mu_boot_orig = mu_boot_norm * scales + standardizer_theta.mean
+            mu_boot_orig = mu_boot_norm * scales + model.standardizer_theta.mean
             Sigma_boot_orig = Sigma_boot_norm * torch.outer(scales, scales)
             
             # Ensure covariance is invertible

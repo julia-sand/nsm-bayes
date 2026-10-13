@@ -2,7 +2,7 @@
 
 The full pipeline is exercised end to end through ``run_turin._run`` with a
 tiny config (see :mod:`tests.conftest` for the fast NLE/
-score-matching stand-ins).  The :class:`TurinModel` simulator is also tested
+score-matching stand-ins).  The :class:`TurinSimulator` simulator is also tested
 directly: it must stay self-contained and deterministic under a fixed seed.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from nsm_bayes.simulators.benchmark_simulators.simulators import TurinModel
+from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
 from scripts import run_turin
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
@@ -33,14 +33,14 @@ def turin_run(turin_cfg, tmp_path):
 def test_turin_model_deterministic():
     """The same seed gives bit-identical moment summaries."""
     t = _theta_true()
-    sim = TurinModel(N=30, Ns=801, device="cpu")
+    sim = TurinSimulator(N=30, Ns=801, device="cpu")
     torch.manual_seed(0)
     a = sim.simulate(t, output="moments", epsilon=0.1)
     torch.manual_seed(0)
     b = sim.simulate(t, output="moments", epsilon=0.1)
-    assert a.shape == (30, 3), f"TurinModel moments shape {tuple(a.shape)}"
+    assert a.shape == (30, 3), f"TurinSimulator moments shape {tuple(a.shape)}"
     assert torch.isfinite(a).all()
-    assert torch.equal(a, b), "TurinModel is not deterministic under a fixed seed"
+    assert torch.equal(a, b), "TurinSimulator is not deterministic under a fixed seed"
 
 
 def test_turin_model_epsilon_changes_output():
@@ -48,7 +48,7 @@ def test_turin_model_epsilon_changes_output():
     t = _theta_true()
     n = 60
     torch.manual_seed(1)
-    sim = TurinModel(N=n, Ns=801, device="cpu")
+    sim = TurinSimulator(N=n, Ns=801, device="cpu")
     clean = sim.simulate(t, output="moments", epsilon=0.0)
     torch.manual_seed(1)
     noisy = sim.simulate(t, output="moments", epsilon=0.5)
@@ -85,7 +85,7 @@ def test_turin_simulated_data_shapes(turin_run, turin_cfg):
 def test_turin_prior():
     """The built-in prior matches the hyperparameters in ``configs/turin.yaml``."""
     cfg = OmegaConf.load("configs/turin.yaml")
-    sim = TurinModel()
+    sim = TurinSimulator()
     prior = sim.prior()
     assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
     assert torch.allclose(
@@ -97,7 +97,7 @@ def test_turin_prior():
 
 def test_turin_generate_training_data_shapes():
     """Training data from the prior has the expected shapes."""
-    sim = TurinModel(N=6, Ns=33, device="cpu")
+    sim = TurinSimulator(N=6, Ns=33, device="cpu")
     theta, x_sim = sim.generate_training_data(sim.prior(), 6)
     assert theta.shape == (6, 4)
     assert x_sim.shape == (6, 3)

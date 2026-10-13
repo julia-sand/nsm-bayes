@@ -16,7 +16,7 @@ from nsm_bayes.method import (
 )
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
-from nsm_bayes.simulators.benchmark_simulators.simulators import TurinModel
+from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils import run_mcmc
 
@@ -40,7 +40,13 @@ def _run(cfg: DictConfig, save_dir: Path):
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
 
     # Initialize the Turin channel model simulator
-    sim = TurinModel(B=cfg.B_hz, Ns=cfg.Ns, device=cfg.device)
+    sim = TurinSimulator(
+        B=cfg.B_hz,
+        Ns=cfg.Ns,
+        device=cfg.device,
+        prior_mean=cfg.prior_mean if "prior_mean" in cfg else None,
+        prior_cov=cfg.prior_cov if "prior_cov" in cfg else None,
+    )
 
     # Gaussian prior (configs/turin.yaml)
     prior = sim.prior()
@@ -232,13 +238,12 @@ def _run(cfg: DictConfig, save_dir: Path):
 
         # Calibrating beta
         calibrated_beta, gpc_history = calibrate_beta_gpc(
-            x_obs=x_obs_mis,
-            T_phi_net=T_phi_net,
-            b_phi_net=b_phi_net,
+            x_obs_mis,
+            model,
             prior_mean=prior_mean,
             prior_cov=prior_cov,
-            standardizer_x=standardizer_x,
-            standardizer_theta=standardizer_theta,
+            #standardizer_x=standardizer_x,
+            #standardizer_theta=standardizer_theta,
             initial_beta=cfg.beta_base_case1,
             target_coverage=1.0 - cfg.alpha,
             num_iterations=cfg.T,        # Number of updates to beta
@@ -279,7 +284,7 @@ def _run(cfg: DictConfig, save_dir: Path):
         print("Iteration number: ", ind)
 
 if __name__ == "__main__":
-    run_turin()
+    pass
 
 @hydra.main(version_base=None, config_path="../configs", config_name="turin")
 def run_turin(cfg: DictConfig):
