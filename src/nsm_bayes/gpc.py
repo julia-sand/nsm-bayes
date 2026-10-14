@@ -106,7 +106,6 @@ def reweight_for_bootstrap_beta(
 def weighted_mean_cov(
     theta_samples: torch.Tensor,
     w: torch.Tensor,
-    jitter: float = 1e-6,
 ):
     """
     Weighted mean and covariance of samples.
@@ -117,10 +116,7 @@ def weighted_mean_cov(
         Samples of shape ``(M, d)``.
     w : torch.Tensor
         Non-negative weights of shape ``(M,)``.
-    jitter : float, default 1e-6
-        Value added to the diagonal of the covariance to keep it
-        invertible.
-
+    
     Returns
     -------
     mu : torch.Tensor
@@ -128,15 +124,12 @@ def weighted_mean_cov(
     Sigma : torch.Tensor
         Weighted covariance of shape ``(d, d)``.
     """
-    M, d = theta_samples.shape
     w = w.view(-1, 1)
     mu = (w * theta_samples).sum(dim=0)
     xc = theta_samples - mu
     # weighted covariance (posterior convention: no Bessel correction)
     Sigma = (w * xc).T @ xc / (w.sum() + EPS)
-    # regularise a bit
-    eye = torch.eye(d, device=theta_samples.device, dtype=theta_samples.dtype)
-    Sigma = Sigma + jitter * eye
+    
     return mu, Sigma
 
 def weighted_mahalanobis_sq(theta_samples: torch.Tensor, mu: torch.Tensor, Sigma_inv: torch.Tensor):
@@ -161,12 +154,11 @@ def bootstrap_coverage_indicator(
 ) -> int:
     w = weights_row / (weights_row.sum() + EPS)
     mu, Sigma = weighted_mean_cov(theta_samples, w)
-    Sigma_inv = torch.linalg.inv(Sigma)
+    Sigma_inv = sigma_inverse(Sigma)
     d2 = weighted_mahalanobis_sq(theta_samples, mu, Sigma_inv)
     thresh = weighted_quantile(d2, w, 1.0 - alpha)
     d2_hat = (theta_hat - mu).unsqueeze(0) @ Sigma_inv @ (theta_hat - mu).unsqueeze(1)
     return int(d2_hat.item() <= thresh.item())
-
 
 def calibrate_beta(
     theta_samples_base: torch.Tensor,   # (M, d) samples drawn at beta_base on original data

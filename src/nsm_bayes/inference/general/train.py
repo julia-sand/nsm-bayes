@@ -1,5 +1,6 @@
 import torch
 
+
 def compute_theta_hat_true_general(
     x_obs: torch.Tensor,                       # (n, d_x)
     q_phi_log_prob,                            # fn (x_batch, theta_batch) -> log prob

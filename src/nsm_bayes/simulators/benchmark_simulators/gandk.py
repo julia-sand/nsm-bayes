@@ -180,3 +180,38 @@ class GandKSimulator:
         if num_samples is not None:
             return dist.sample((num_samples,))
         return dist
+    def generate_observed_data(
+        self,
+        theta: torch.Tensor,
+        n_obs: int,
+        epsilon: float = 0.0,
+    ) -> torch.Tensor:
+        """Generate observed data with potential outliers.
+
+        Parameters
+        ----------
+        theta : torch.Tensor
+            True parameter vector in log space.
+        n_obs : int
+            Number of receivers to simulate.
+        epsilon : float, default 0.0
+            Fraction of receivers to replace with pure noise.
+
+        Returns
+        -------
+        torch.Tensor
+            Simulated observed data of shape (n_obs, 1).
+        """
+        theta_batch = theta.expand(n_obs, -1)
+        x_obs = self.simulate(theta_batch, n=1).squeeze(-1)
+        
+        n_out = int(torch.floor(torch.tensor(epsilon * n_obs)).item())
+        outlier_indices = torch.randperm(n_obs)[:n_out]
+        
+        if n_out > 0:
+            theta_out = self.prior(num_samples=n_out)
+            x_noise = self.simulate(theta_out, n=1).squeeze(-1)
+            x_obs[outlier_indices] = x_noise
+            
+        return x_obs
+

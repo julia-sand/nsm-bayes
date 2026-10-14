@@ -124,11 +124,8 @@ class SIRSimulator:
         theta: torch.Tensor,
         T: int = 100,
         N: int = 10_000,
-        Ns: int = None,
-        output: str = "moments",
-        epsilon: float = 0.0,
         **kwargs,
-    ) -> torch.Tensor | tuple:
+    ) -> torch.Tensor:
         """Stochastic discrete-time SIR with Binomial transitions.
 
         Parameters
@@ -141,23 +138,14 @@ class SIRSimulator:
             Time horizon.
         N : int, default 10_000
             Population size.
-        Ns : int, optional
-            Not used for SIR, provided for API consistency.
-        output : str, default "moments"
-            "moments" to return summary statistics, "data" for raw trajectories.
-        epsilon : float, default 0.0
-            Fraction of contaminated samples (ignored in simulate, handled in
-            generate_observed_data).
         **kwargs : dict
             Additional arguments (ignored).
 
         Returns
         -------
-        torch.Tensor or tuple
-            If output == "moments", returns summary statistics of shape (n, 3).
-            If output == "data", returns simulated trajectories of shape (n, T).
+        torch.Tensor
+            Simulated trajectories of shape (n, T).
         """
-        del Ns
         assert theta.dim() == 2
         n, d = theta.shape
         device = theta.device
@@ -212,12 +200,7 @@ class SIRSimulator:
                 probs = (phi / (phi + mu + EPS8)).clamp(EPS6, 1 - EPS6)
                 y[:, t] = NegativeBinomial(total_count=phi, probs=probs).sample()
 
-        if output == "moments":
-            return self.summary(y, N)
-        elif output == "data":
-            return y
-
-        raise ValueError(f"Unknown output {output!r}; expected 'moments' or 'data'")
+        return y
 
     def summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
         """Compute summary statistics for SIR incidence.
@@ -233,13 +216,25 @@ class SIRSimulator:
         -------
         torch.Tensor
             Summary statistics of shape (n, 3): [attack_rate, t_peak_scaled, peak_scaled].
+
+        Raises
+        ------
+        ValueError
+            If `y` is already summarized (i.e., has 3 columns).
         """
         y = y.to(torch.float32)
         n, T = y.shape
 
+        if T == 3:
+            raise ValueError(
+                "Input data `y` appears to be already summarized (shape (n, 3)). "
+                "Summary statistics should be computed from raw incidence data (n, T)."
+            )
+
         attack = y.sum(dim=1) / float(N)
         peak = y.max(dim=1).values / float(N)
         t_peak = y.argmax(dim=1).to(torch.float32) / float(max(T - 1, 1))
+
 
         return torch.stack([attack, t_peak, peak], dim=1)
 

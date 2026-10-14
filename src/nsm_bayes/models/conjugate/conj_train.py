@@ -1,11 +1,13 @@
-import torch
-from torch import nn
-import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader, random_split
 import copy
 from typing import Dict
+
+import torch
+import torch.optim as optim
+from torch import nn
+from torch.utils.data import DataLoader, TensorDataset, random_split
+
 from nsm_bayes.method import calculate_training_loss
-    
+
 
 # Function to train the surrogate model for the conjugate case
 def train_q_phi(  #add training params to be passed explicitly?

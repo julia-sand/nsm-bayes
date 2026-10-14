@@ -94,8 +94,6 @@ class ConjugateModel(nn.Module):
         else:
             mu_hat_obs, Sigma_hat_obs = sample_mean_and_covariance(x_n)
 
-        # sigma_inverse adds 1e-6 * I to the diagonal, matching the original
-        # inv(S + 1e-6 I) behaviour.
         Sigma_inv = sigma_inverse(Sigma_hat_obs)
         mu_n_normalized, Sigma_n_normalized = compute_posterior_conjugate(
                     x_n, self, beta,

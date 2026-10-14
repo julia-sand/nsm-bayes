@@ -454,7 +454,7 @@ def compute_posterior_conjugate(
     """
     
     # Invert prior covariance to get prior precision
-    prior_cov_inv = torch.linalg.inv(prior_cov)
+    prior_cov_inv = sigma_inverse(prior_cov)
     
     # 1. Compute the posterior precision matrix
     Sigma_n_inv = compute_posterior_precision_conjugate(
@@ -486,9 +486,8 @@ def compute_posterior_conjugate(
 
     # --- 4. Compute Posterior Covariance from Precision ---
     
-    # Use a numerically stable Cholesky-based inverse
-    L = torch.linalg.cholesky(Sigma_n_inv)
-    Sigma_n = torch.cholesky_inverse(L)
+    # Invert the posterior precision (with jitter for numerical stability)
+    Sigma_n = sigma_inverse(Sigma_n_inv)
     
     return mu_n, Sigma_n
 

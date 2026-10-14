@@ -295,3 +295,43 @@ class TurinSimulator:
         x_sim = self.simulate(theta, N=n)
         return theta, x_sim
 
+    def generate_observed_data(
+        self,
+        theta: torch.Tensor,
+        n_obs: int,
+        epsilon: float = 0.0,
+    ) -> torch.Tensor:
+        """Generate observed data with potential outliers.
+
+        Parameters
+        ----------
+        theta : torch.Tensor
+            True parameter vector in log space.
+        n_obs : int
+            Number of receivers to simulate.
+        epsilon : float, default 0.0
+            Fraction of receivers to replace with pure noise.
+
+        Returns
+        -------
+        torch.Tensor
+            Simulated observed data (moments) of shape (n_obs, K).
+        """
+        # Draw theta for each receiver (identical to theta_true)
+        theta_batch = theta.expand(n_obs, -1)
+        # Simulate
+        x_obs = self.simulate(theta_batch, N=n_obs)
+        
+        # Introduce outliers: replace epsilon * n_obs receivers with noise
+        n_out = int(torch.floor(torch.tensor(epsilon * n_obs)).item())
+        outlier_indices = torch.randperm(n_obs)[:n_out]
+        
+        # Create noise (using a random theta or just random normal if appropriate)
+        # For consistency with this model, we can sample a random theta from the prior
+        if n_out > 0:
+            theta_out = self.prior(num_samples=n_out)
+            x_noise = self.simulate(theta_out, N=n_out)
+            x_obs[outlier_indices] = x_noise
+            
+        return x_obs
+

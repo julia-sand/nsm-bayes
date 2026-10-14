@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+
 class TphiNet(nn.Module):
     """Network to approximate the T_phi mapping.
 
