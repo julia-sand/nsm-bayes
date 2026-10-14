@@ -1,16 +1,18 @@
 import pickle
 import time
 from pathlib import Path
+
 import hydra
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
-from nsm_bayes.gpc import calibrate_beta_gpc
 
+from nsm_bayes.gpc import calibrate_beta_gpc
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
+from nsm_bayes.utils import set_seed
 
 
 def _run(cfg: DictConfig, save_dir: Path):
@@ -35,14 +37,14 @@ def _run(cfg: DictConfig, save_dir: Path):
     n_obs = cfg.n_obs # Number of observed data samples
     epsilon = cfg.epsilon # Percentage of outliers in the observed data
     sim = SIRSimulator(
-        prior_mean=prior_mean if "prior_mean" in cfg else None,
-        prior_cov=prior_cov if "prior_cov" in cfg else None,
+        prior_mean=prior_mean,
+        prior_cov=prior_cov,
     )
     # Setting directory for saving data
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
     
     for ind in range(num_repeat):
-        torch.manual_seed(ind+123)
+        set_seed(cfg.seed_offset + ind)
         d_theta = prior_mean.shape[0]  # Number of parameters
         d_x = cfg.d_x # Data dimension
         #######-------Generate training data-----######
@@ -96,7 +98,6 @@ def _run(cfg: DictConfig, save_dir: Path):
             target_coverage=1.0 - cfg.alpha,
             num_iterations=cfg.T,        # Number of updates to beta
             num_bootstraps=cfg.B,        # B, number of samples to estimate coverage
-            learning_rate_fn = lambda t: 10.0 / (t + 10.),
             beta_min = cfg.beta_min_case1
         )
 
@@ -127,11 +128,13 @@ def _run(cfg: DictConfig, save_dir: Path):
             pickle.dump(cost_sm_case1_posterior, f)
         print("Iteration number: ", ind)
 
+@hydra.main(version_base=None, config_path="../../configs", config_name="sir_undercounting")
+def run_sir_undercounting(cfg: DictConfig):
+    """Hydra entry point for the run_sir_undercounting experiment."""
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
+    _run(cfg=cfg, save_dir=save_dir)
+
 if __name__ == "__main__":
-    @hydra.main(version_base=None, config_path="../configs", config_name="sir_undercounting")
-    def run_sir_undercounting(cfg: DictConfig):
-        """Hydra entry point for the run_sir_undercounting experiment."""
-        save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
-        _run(cfg=cfg, save_dir=save_dir)
+    
 
     run_sir_undercounting() 

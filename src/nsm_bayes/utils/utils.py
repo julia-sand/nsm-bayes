@@ -1,40 +1,11 @@
 """Shared utilities for MCMC sampling and robust statistics."""
 from __future__ import annotations
 
+import random
+
 import numpy as np
 import torch
-from torch.distributions import Binomial, MultivariateNormal, StudentT
-
-
-def run_mcmc(
-    target_log_prob,
-    initial_state,
-    n_samples=10000,
-    burn_in=2000,
-):
-    """Simplified MCMC sampler for testing purposes.
-
-    In a real scenario, this would be replaced by a proper NUTS or Metropolis
-    sampler.
-    """
-    samples = []
-    current_state = initial_state
-    current_log_prob = target_log_prob(current_state)
-
-    for i in range(n_samples):
-        # Propose a new state
-        proposal = current_state + torch.randn_like(current_state) * 0.1
-        proposal_log_prob = target_log_prob(proposal)
-
-        # Accept or reject
-        if torch.log(torch.rand(1)) < proposal_log_prob - current_log_prob:
-            current_state = proposal
-            current_log_prob = proposal_log_prob
-
-        if i >= burn_in:
-            samples.append(current_state.clone())
-
-    return torch.stack(samples)
+from torch.func import jacfwd, jacrev
 
 
 def sample_mean_and_covariance(samples: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -55,3 +26,47 @@ def sample_mean_and_covariance(samples: torch.Tensor) -> tuple[torch.Tensor, tor
     cov = (diff.T @ diff) / (samples.shape[0] - 1)
     return mean, cov
 
+
+
+def _single(fn):
+    """Wrap fn: (1, d_x) -> (1, d_out) as (d_x,) -> (d_out,)."""
+    return lambda x: fn(x.unsqueeze(0)).squeeze(0)
+
+
+def jacobian_with_spare(xi, fn):
+    """Jacobian of fn at xi, returned twice.
+
+    fn maps (1, d_x) -> (1, d_out), e.g. model.T_phi or model.b_phi.
+    jacfwd differentiates the first output (-> Hessian) and passes the
+    second through as aux (-> Jacobian), so J is computed only once.
+    """
+    #fn_single = lambda x: fn(x.unsqueeze(0)).squeeze(0)   # (d_x,) -> (d_out,)
+    J = jacrev(_single(fn))(xi)                              # (d_out, d_x)
+    return J, J
+
+def jacobian(fn, xi):
+    """(d_out, d_x)"""
+    return jacrev(_single(fn))(xi)
+
+
+def jacobian_and_hessian(fn, xi):
+    """Jacobian (d_out, d_x) and Hessian (d_out, d_x, d_x) from one forward-over-reverse pass."""
+    H, J = jacfwd(jacobian_with_spare, has_aux=True)(xi,fn)
+    return J, H
+
+def jacobian_and_laplacian(fn, xi):
+    """Jacobian (d_out, d_x) and Laplacian (d_out,)."""
+    J, H = jacobian_and_hessian(fn, xi)
+    return J, H.diagonal(dim1=-2, dim2=-1).sum(-1)
+
+def set_seed(seed: int) -> None:
+    """Seed the random, numpy and torch global RNGs with `seed`.
+
+    Parameters
+    ----------
+    seed : int
+        Seed value passed to each of the three RNGs.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)

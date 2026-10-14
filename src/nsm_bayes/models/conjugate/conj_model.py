@@ -2,11 +2,17 @@
 import torch
 from torch import nn
 
+from nsm_bayes.method import (
+    compute_posterior_conjugate,
+    robust_mean_cov,
+    sample_mean_and_covariance,
+    sigma_inverse,
+)
 from nsm_bayes.models.conjugate.bphi_net import BphiNet
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
-from nsm_bayes.method import sigma_inverse, robust_mean_cov, compute_posterior_case1,sample_mean_and_covariance
 from nsm_bayes.utils.weightfuns import imq_weight
+
 
 class TorchStandardizer(nn.Module):
     """Per-dimension (x - mean) / std with statistics stored as buffers, so they are
@@ -88,13 +94,15 @@ class ConjugateModel(nn.Module):
         else:
             mu_hat_obs, Sigma_hat_obs = sample_mean_and_covariance(x_n)
 
+        # sigma_inverse adds 1e-6 * I to the diagonal, matching the original
+        # inv(S + 1e-6 I) behaviour.
         Sigma_inv = sigma_inverse(Sigma_hat_obs)
-        mu_n_normalized, Sigma_n_normalized = compute_posterior_case1(
+        mu_n_normalized, Sigma_n_normalized = compute_posterior_conjugate(
                     x_n, self, beta,
                     self.standardizer_theta(prior_mean), prior_cov / torch.outer(s, s),
                     imq_weight, mu_hat_obs, Sigma_inv, c)
         mu_n = mu_n_normalized * s + m
-        Sigma_n = Sigma_n_normalized * s  
+        Sigma_n = Sigma_n_normalized * torch.outer(s, s) 
         return mu_n, Sigma_n
         
     def sample_posterior(self):
@@ -109,5 +117,5 @@ class ConjugateModel(nn.Module):
             "standardizer_theta_state_dict": self.standardizer_theta.state_dict(),
             "config": dict(cfg),
         },
-            save_dir / f"case1_nets_{ind}.pt"
+            save_dir / f"conjugate_nets_{ind}.pt"
         )

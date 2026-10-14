@@ -1,24 +1,27 @@
 import pickle
 import time
 from pathlib import Path
+
 import hydra
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
+
 from nsm_bayes.gpc import calibrate_beta
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
-    compute_posterior_case1,
     robust_mean_cov,
-    imq_weight,
+    sigma_inverse,
 )
-from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.models.general.normflow import run_mcmc
 from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import run_mcmc, sample_mean_and_covariance
+from nsm_bayes.utils import sample_mean_and_covariance, set_seed
+
+
 def _run(cfg: DictConfig, save_dir: Path):
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
@@ -47,7 +50,7 @@ def _run(cfg: DictConfig, save_dir: Path):
     # Setting directory for saving data
     save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
     for ind in range(num_repeat):
-        torch.manual_seed(ind+123)
+        set_seed(cfg.seed_offset + ind)
         d_theta = prior_mean.shape[0]  # Number of parameters
         d_x = cfg.d_x # Data dimension
         #######-------Generate training data-----######
@@ -100,12 +103,11 @@ def _run(cfg: DictConfig, save_dir: Path):
         with open(save_dir/ f"samples_nle_mis_{ind}.pkl", "wb") as f:
             pickle.dump(samples_nle_mis, f)
         #######-------Run neural score-matching Bayes------#######
-        c = 1.
         if not cfg.robust_flag:
             mu_hat, Sigma_hat = sample_mean_and_covariance(x_obs_mis)
         else:
             mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
-        Sigma_inv = torch.linalg.inv(Sigma_hat + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
+        Sigma_inv = sigma_inverse(Sigma_hat)
         start_time = time.perf_counter() 
         # Initial run of MCMC
         sm_lp_base = ScoreMatchingLogPosterior(
@@ -113,7 +115,7 @@ def _run(cfg: DictConfig, save_dir: Path):
             prior=prior,
             beta=cfg.beta_base_general,
             q_phi_log_prob=likelihood_estimator,
-            mu_hat=mu_hat, Sigma_inv=Sigma_inv, c=c, weight_type="imq"
+            mu_hat=mu_hat, Sigma_inv=Sigma_inv, weight_type="imq"
         )
         theta_samples_base = run_multivariate_slice_sampler_tuned(
             log_posterior_fn=sm_lp_base,
@@ -125,7 +127,7 @@ def _run(cfg: DictConfig, save_dir: Path):
             sm_lp = ScoreMatchingLogPosterior(
                 x_obs=x_obs_mis, prior=prior, beta=beta_new,
                 q_phi_log_prob=likelihood_estimator,
-                mu_hat=mu_hat, Sigma_inv=Sigma_inv, c=c, weight_type="imq"
+                mu_hat=mu_hat, Sigma_inv=Sigma_inv, weight_type="imq"
             )
             arr = run_multivariate_slice_sampler_tuned(
                 log_posterior_fn=sm_lp, prior=prior,
@@ -140,11 +142,9 @@ def _run(cfg: DictConfig, save_dir: Path):
             mu_hat=mu_hat,
             Sigma_inv=Sigma_inv,
             weight_type="imq",
-            c=c,
             alpha=cfg.alpha,  
             B=cfg.B,
             T=cfg.T,
-            step_schedule=lambda t: 10.0/(t+10.),
             beta_min=cfg.beta_min_general,
             refresh_sampler=refresh_sampler_at
         )
@@ -155,7 +155,6 @@ def _run(cfg: DictConfig, save_dir: Path):
             q_phi_log_prob=likelihood_estimator,
             mu_hat=mu_hat,
             Sigma_inv=Sigma_inv,
-            c=c,
             weight_type="imq"
         )
         samples_sm_general = run_multivariate_slice_sampler_tuned(
@@ -180,7 +179,7 @@ def _run(cfg: DictConfig, save_dir: Path):
         
         print("Iteration number: ", ind)
 
-@hydra.main(version_base=None, config_path="../configs", config_name="sir_undercounting")
+@hydra.main(version_base=None, config_path="../../configs", config_name="sir_undercounting")
 def run_sir_undercounting(cfg: DictConfig):
     """Hydra entry point for the run_sir_undercounting experiment."""
     save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name

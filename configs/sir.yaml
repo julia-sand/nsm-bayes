@@ -42,3 +42,7 @@ d_x: 3
 sr_num_samples_per_param: 6
 sr_num_samples_per_param_boot: 3
 sr_num_posterior_bootstrap: 180
+
+robust_flag: false
+
+seed_offset: 123           # RNG seed = seed_offset + repeat index (sir scripts used ind+123)

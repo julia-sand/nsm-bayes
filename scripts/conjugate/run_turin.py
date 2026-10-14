@@ -7,17 +7,12 @@ import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.method import (
-    ScoreMatchingLogPosterior,
-    robust_mean_cov,
-    imq_weight,
-)
+from nsm_bayes.gpc import calibrate_beta_gpc
 from nsm_bayes.models.conjugate import ConjugateModel
-from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.models.general import train_normflow
+from nsm_bayes.models.general.normflow import run_mcmc
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import run_mcmc
+from nsm_bayes.utils import set_seed
 
 
 def _run(cfg: DictConfig, save_dir: Path):
@@ -56,7 +51,7 @@ def _run(cfg: DictConfig, save_dir: Path):
 
     for ind in range(num_repeat):
 
-        torch.manual_seed(ind + 123)
+        set_seed(cfg.seed_offset + ind)
 
         #######-------Generate training data-----######
         start_time = time.perf_counter() # Record the start time
@@ -147,7 +142,6 @@ def _run(cfg: DictConfig, save_dir: Path):
             target_coverage=1.0 - cfg.alpha,
             num_iterations=cfg.T,        # Number of updates to beta
             num_bootstraps=cfg.B,        # B, number of samples to estimate coverage
-            learning_rate_fn = lambda t: 10.0 / (t + 10.),
             beta_min = cfg.beta_min_case1
         )
         
@@ -181,11 +175,11 @@ def _run(cfg: DictConfig, save_dir: Path):
 
         print("Iteration number: ", ind)
 
-if __name__ == "__main__":
-    pass
-
-@hydra.main(version_base=None, config_path="../configs", config_name="turin")
+@hydra.main(version_base=None, config_path="../../configs", config_name="turin")
 def run_turin(cfg: DictConfig):
     """Hydra entry point for the run_turin experiment."""
     save_dir = (Path(get_original_cwd()) / "data" / cfg.experiment_name / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}")
     _run(cfg=cfg, save_dir=save_dir)
+
+if __name__ == "__main__":
+    run_turin()

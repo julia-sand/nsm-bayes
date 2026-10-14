@@ -49,7 +49,7 @@ def test_gnk_observed_data(gnk_run, gnk_cfg):
 
 def test_gnk_nets_saved(gnk_run):
     """The Case-1 nets and standardizers are saved with the expected keys."""
-    nets = torch.load(gnk_run / "case1_nets_0.pt", map_location="cpu", weights_only=False)
+    nets = torch.load(gnk_run / "conjugate_nets_0.pt", map_location="cpu", weights_only=False)
     for key in (
         "T_phi_state_dict",
         "B_phi_state_dict",
@@ -57,7 +57,7 @@ def test_gnk_nets_saved(gnk_run):
         "standardizer_theta_state_dict",
         "config",
     ):
-        assert key in nets, f"case1_nets missing {key!r}"
+        assert key in nets, f"conjugate_nets missing {key!r}"
 
 
 def test_gnk_case1_posterior(gnk_run, gnk_cfg):

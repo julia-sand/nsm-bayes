@@ -40,3 +40,7 @@ alpha: 0.05              # 1-alpha credible set
 hidden_dim: 128          # Hidden dimension of neural network used in case 1
 
 d_x: 3
+
+robust_flag: false
+
+seed_offset: 123           # RNG seed = seed_offset + repeat index (turin scripts used ind+123)

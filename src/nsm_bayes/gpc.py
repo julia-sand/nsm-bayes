@@ -1,3 +1,5 @@
+"""Beta calibration (general posterior calibration) for NSM-Bayes."""
+
 import math
 from collections.abc import Callable
 
@@ -6,8 +8,17 @@ from scipy.stats import chi2
 from torch.func import hessian, jacrev, vmap
 from tqdm import tqdm
 
-from nsm_bayes.method import compute_posterior_case1, robust_mean_cov, w_imq_squared, w_imq_squared_grad
-from nsm_bayes.utils.weightfuns import weight_function_factory_batched
+from nsm_bayes.method import (
+    compute_posterior_conjugate,
+    get_div_term_single,
+    robust_mean_cov,
+    sigma_inverse,
+)
+from nsm_bayes.utils.weightfuns import imq_weight, weight_function
+
+# Small constant that only guards divisions and logs from 0/NaN.
+EPS = 1e-12
+
 
 def cache_perx_sm_losses(
     theta_samples: torch.Tensor,           # (M, d_theta)
@@ -88,24 +99,44 @@ def reweight_for_bootstrap_beta(
     expo = - (beta_new * n) * L_b + (beta_base * n) * L_orig.unsqueeze(0)
     expo = expo - expo.max(dim=1, keepdim=True).values
     W = torch.exp(expo)
-    W = W / (W.sum(dim=1, keepdim=True) + 1e-12)
+    W = W / (W.sum(dim=1, keepdim=True) + EPS)
     return W
 
 
-def weighted_mean_cov(theta_samples: torch.Tensor, w: torch.Tensor):
+def weighted_mean_cov(
+    theta_samples: torch.Tensor,
+    w: torch.Tensor,
+    jitter: float = 1e-6,
+):
     """
-    theta_samples: (M, d); w: (M,) normalised weights.
-    returns mu: (d,), Sigma: (d,d)
+    Weighted mean and covariance of samples.
+
+    Parameters
+    ----------
+    theta_samples : torch.Tensor
+        Samples of shape ``(M, d)``.
+    w : torch.Tensor
+        Non-negative weights of shape ``(M,)``.
+    jitter : float, default 1e-6
+        Value added to the diagonal of the covariance to keep it
+        invertible.
+
+    Returns
+    -------
+    mu : torch.Tensor
+        Weighted mean of shape ``(d,)``.
+    Sigma : torch.Tensor
+        Weighted covariance of shape ``(d, d)``.
     """
     M, d = theta_samples.shape
     w = w.view(-1, 1)
     mu = (w * theta_samples).sum(dim=0)
     xc = theta_samples - mu
-    # weighted covariance with Bessel-like correction off (posterior covariance)
-    Sigma = (w * xc).T @ xc / (w.sum() + 1e-12)
+    # weighted covariance (posterior convention: no Bessel correction)
+    Sigma = (w * xc).T @ xc / (w.sum() + EPS)
     # regularise a bit
     eye = torch.eye(d, device=theta_samples.device, dtype=theta_samples.dtype)
-    Sigma = Sigma + 1e-6 * eye
+    Sigma = Sigma + jitter * eye
     return mu, Sigma
 
 def weighted_mahalanobis_sq(theta_samples: torch.Tensor, mu: torch.Tensor, Sigma_inv: torch.Tensor):
@@ -119,7 +150,7 @@ def weighted_quantile(values: torch.Tensor, w: torch.Tensor, q: float):
     v, idx = torch.sort(values)
     w_sorted = w[idx]
     cdf = torch.cumsum(w_sorted, dim=0)
-    cdf = cdf / (cdf[-1] + 1e-12)
+    cdf = cdf / (cdf[-1] + EPS)
     return v[torch.searchsorted(cdf, torch.tensor(q, device=v.device))]
 
 def bootstrap_coverage_indicator(
@@ -128,7 +159,7 @@ def bootstrap_coverage_indicator(
     theta_hat: torch.Tensor,       # (d,)
     alpha: float
 ) -> int:
-    w = weights_row / (weights_row.sum() + 1e-12)
+    w = weights_row / (weights_row.sum() + EPS)
     mu, Sigma = weighted_mean_cov(theta_samples, w)
     Sigma_inv = torch.linalg.inv(Sigma)
     d2 = weighted_mahalanobis_sq(theta_samples, mu, Sigma_inv)
@@ -145,26 +176,63 @@ def calibrate_beta(
     mu_hat: torch.Tensor,
     Sigma_inv: torch.Tensor,
     weight_type: str,
-    c: float,
-    alpha: float = 0.05,                # alpha -> 1-alpha is target coverage (e.g. 0.95)
-    B: int = 200,                       # bootstraps per iteration
-    T: int = 10,                        # number of stochastic approx iterations
+    c: float = 1.0,
+    alpha: float = 0.05,
+    B: int = 200,
+    T: int = 10,
     beta_init: float | None = None,
     step_schedule: Callable[[int], float] = lambda t: 10.0 / (t + 10),
-    max_log_step: float = 0.25,     # cap on k_t * (coverage error)
+    max_log_step: float = 0.25,
     beta_min: float = 0.01,
-    ess_threshold: float = 0.3,         # if ESS too small, we may refresh samples
-    refresh_sampler: Callable[[float], torch.Tensor] | None = None,  # sampler(beta)->(M,d)
+    ess_threshold: float = 0.3,
+    refresh_sampler: Callable[[float], torch.Tensor] | None = None,
 ) -> tuple[float, dict]:
     """
-    Calibrate beta via bootstrap coverage matching for NSM-Bayes
+    Calibrate beta via bootstrap coverage matching for NSM-Bayes.
+
+    Parameters
+    ----------
+    theta_samples_base : torch.Tensor
+        Samples drawn at `beta_base` on the original data, shape ``(M, d)``.
+    beta_base : float
+        Beta value the base samples were drawn at.
+    x_obs : torch.Tensor
+        Observed data, shape ``(n, d_x)``.
+    q_phi_log_prob : callable
+        ``(x, theta) -> scalar`` log-density of the estimator.
+    mu_hat : torch.Tensor
+        Robust location of the data, shape ``(d_x,)``.
+    Sigma_inv : torch.Tensor
+        Inverse robust covariance, shape ``(d_x, d_x)``.
+    weight_type : str
+        Name of the weight function, e.g. ``"imq"`` or ``"none"``.
+    c : float, default 1.0
+        Scale parameter of the IMQ weight.
+    alpha : float, default 0.05
+        Significance level; ``1 - alpha`` is the target coverage.
+    B : int, default 200
+        Number of bootstraps per iteration.
+    T : int, default 10
+        Number of stochastic approximation iterations.
+    beta_init : float or None, default None
+        Starting beta; falls back to `beta_base` when None.
+    step_schedule : callable, default lambda t: 10.0 / (t + 10)
+        Step size ``k_t`` used for the log-beta update at iteration ``t``.
+    max_log_step : float, default 0.25
+        Cap on ``k_t * (coverage error)`` per log-beta update.
+    beta_min : float, default 0.01
+        Lower bound for beta to prevent collapse.
+    ess_threshold : float, default 0.3
+        ESS-to-M ratio below which samples may be refreshed.
+    refresh_sampler : callable or None, default None
+        ``sampler(beta) -> (M, d)`` used to rejuvenate collapsed samples.
 
     Returns
     -------
     beta_star : float
         Final calibrated beta.
     history : dict
-        Dictionary with 'betas' and 'coverages' over iterations, useful for plotting.
+        Dictionary with 'betas' and 'coverages' over iterations.
     Notes
     -----
     - We importance-reweight the original MCMC samples from beta_base to get
@@ -181,7 +249,7 @@ def calibrate_beta(
     n = x_obs.shape[0]
 
     # Precompute IMQ weights (or "none") once
-    w2, grad_w2 = weight_function_factory_batched(weight_type, x_obs, mu_hat, Sigma_inv, c)
+    w2, grad_w2 = weight_function(weight_type, x_obs, mu_hat, Sigma_inv, c)
     
     # Cache per-x losses for all base samples, plus base average loss
     # ell:   (M, n)   per-x losses
@@ -252,7 +320,7 @@ def calibrate_beta(
         # --- Step 6: track effective sample size (ESS) to detect weight degeneracy
         # ESS per bootstrap b: 1 / sum_m W[b,m]^2
         ess = (W**2).sum(dim=1)
-        ess = 1.0 / (ess + 1e-12)
+        ess = 1.0 / (ess + EPS)
         ess_mean = ess.mean().item()
 
         # If weights have collapsed and we can resample, rejuvenate MCMC at new beta
@@ -285,11 +353,10 @@ def compute_theta_hat_true_case1(
     x_obs: torch.Tensor,
     T_phi: torch.nn.Module,
     b_phi: torch.nn.Module,
-    w_imq_squared_fn,
+    weight_fn,
     mu_hat_obs: torch.Tensor,
     Sigma_inv_obs: torch.Tensor,
     c: float,
-    jitter: float = 1e-6,
 ) -> torch.Tensor:
     """
     Compute the NSM-only minimiser theta_hat_true for NSM-Bayes-conj:
@@ -298,17 +365,28 @@ def compute_theta_hat_true_case1(
     This corresponds to the M-estimator used as the "true" parameter
     in the Syring & Martin calibration paper.
 
-    Args:
-        x_obs: (n, d_x) observed data (already normalized if you use standardizer_x).
-        T_phi, b_phi: trained networks.
-        w_imq_squared_fn: function w^2(x) used elsewhere.
-        mu_hat_obs, Sigma_inv_obs, c: the same robust-location / weight hyperparams
-            you already pass to compute_posterior_case1.
-        jitter: small diagonal regularizer for the linear solve.
+    Parameters
+    ----------
+    x_obs : torch.Tensor
+        (n, d_x) observed data (already normalized if you use standardizer_x).
+    T_phi : torch.nn.Module
+        Network mapping x to the natural parameters.
+    b_phi : torch.nn.Module
+        Network mapping x to the log-partition term.
+    weight_fn : callable
+        Function ``w^2(x)`` used elsewhere.
+    mu_hat_obs : torch.Tensor
+        Robust location of the data.
+    Sigma_inv_obs : torch.Tensor
+        Inverse robust covariance of the data.
+    c : float
+        Scale parameter of the IMQ weight.
 
-    Returns:
-        theta_hat_true: (d_theta,) tensor in the same (normalized) theta space
-        that T_phi produces.
+    Returns
+    -------
+    torch.Tensor
+        ``theta_hat_true`` of shape ``(d_theta,)`` in the same (normalized)
+        theta space that T_phi produces.
     """
 
 
@@ -321,7 +399,7 @@ def compute_theta_hat_true_case1(
 
     batched_cov_terms = vmap(get_cov_term_single)(x_obs)  # (n, d_theta, d_theta)
 
-    weights = w_imq_squared_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1, 1)  # (n,1,1)
+    weights = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1, 1)  # (n,1,1)
     A = (weights * batched_cov_terms).sum(dim=0)  # (d_theta, d_theta)
 
     # ---------- 2. B = term_non_div + term_div (vector in R^{d_theta}) ----------
@@ -335,23 +413,23 @@ def compute_theta_hat_true_case1(
         return jac_T @ jac_b               # (d_theta,)
 
     batched_non_div_terms = vmap(get_non_div_term_single)(x_obs)  # (n, d_theta)
-    weights_h = w_imq_squared_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1)  # (n,1)
+    weights_h = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1)  # (n,1)
     term_non_div = (weights_h * batched_non_div_terms).sum(dim=0)  # (d_theta,)
 
     # term_div = sum_i div_x[ w(x_i)^2 * J_T(x_i)^T ]  (vector in R^{d_theta})
-    def get_div_term_single(xi):
-        def divergence_field_fn(x_vec):
-            T_phi_wrapped = lambda z: T_phi(z.unsqueeze(0)).squeeze(0)
-            w2_local = w_imq_squared_fn(x_vec.unsqueeze(0), mu_hat_obs, Sigma_inv_obs, c).squeeze()
-            jac_T_local = jacrev(T_phi_wrapped)(x_vec)  # (d_theta, d_x)
-            # field: (d_x, d_theta); column k is a vector field in R^{d_x}
-            return w2_local * jac_T_local.T
+    #def get_div_term_single(xi):
+    #    def divergence_field_fn(x_vec):
+    #        T_phi_wrapped = lambda z: T_phi(z.unsqueeze(0)).squeeze(0)
+    #        w2_local = w_imq_squared_fn(x_vec.unsqueeze(0), mu_hat_obs, Sigma_inv_obs, c).squeeze()
+    #        jac_T_local = jacrev(T_phi_wrapped)(x_vec)  # (d_theta, d_x)
+    #        # field: (d_x, d_theta); column k is a vector field in R^{d_x}
+    #        return w2_local * jac_T_local.T
 
-        # jac_of_field: (d_x, d_theta, d_x)
-        jac_of_field = jacrev(divergence_field_fn)(xi)
-        # divergence of each column: trace over (0,2) dims, get (d_theta,)
-        divergence = jac_of_field.diagonal(offset=0, dim1=0, dim2=2).sum(dim=1)
-        return divergence  # (d_theta,)
+    #    # jac_of_field: (d_x, d_theta, d_x)
+    #    jac_of_field = jacrev(divergence_field_fn)(xi)
+    #    # divergence of each column: trace over (0,2) dims, get (d_theta,)
+    #    divergence = jac_of_field.diagonal(offset=0, dim1=0, dim2=2).sum(dim=1)
+    #    return divergence  # (d_theta,)
 
     batched_divergences = vmap(get_div_term_single)(x_obs)  # (n, d_theta)
     term_div = batched_divergences.sum(dim=0)               # (d_theta,)
@@ -359,15 +437,15 @@ def compute_theta_hat_true_case1(
     B = term_non_div + term_div  # (d_theta,)
 
     eig = torch.linalg.eigvalsh(A).detach().cpu()
-    print("A: ", A)
-    print("A eig min/max:", eig.min().item(), eig.max().item())
-    print("cond(A):", (eig.max()/eig.min().clamp_min(1e-30)).item())
-    print("||B||:", torch.linalg.norm(B).item())
+    #print("A: ", A)
+    #print("A eig min/max:", eig.min().item(), eig.max().item())
+    #print("cond(A):", (eig.max()/eig.min().clamp_min(1e-30)).item())
+    #print("||B||:", torch.linalg.norm(B).item())
 
     # ---------- 3. Solve A * theta_hat_true = -B ----------
     d_theta = A.shape[0]
     scale = torch.trace(A) / A.shape[0]
-    lam = 1e-2 * scale + 1e-12
+    lam = 1e-2 * scale + EPS
     A_reg = 0.5 * (A + A.T) + lam * torch.eye(d_theta, device=A.device, dtype=A.dtype)
 
     try:
@@ -389,28 +467,48 @@ def calibrate_beta_gpc(
     target_coverage: float = 0.95,
     num_iterations: int = 50,
     num_bootstraps: int = 200,
-    learning_rate_fn = lambda t: 5.0 / (t + 10),
-    max_log_step: float = 0.25,     # cap on k_t * (coverage error)
+    c: float = 1.0,
+    learning_rate_fn = lambda t: 10.0 / (t + 10),
+    max_log_step: float = 0.25,
     beta_min: float = 0.01,
 ) -> tuple[float, dict]:
     """
-    Calibrates the 'beta' hyperparameter using the General Posterior Calibration (GPC) algorithm for NSM-Bayes-conj.
+    Calibrates the 'beta' hyperparameter using the General Posterior
+    Calibration (GPC) algorithm for NSM-Bayes-conj.
 
-    Args:
-        x_obs (torch.Tensor): The original observed data, shape (n, d_x).
-        T_phi_net, b_phi_net: The trained neural network models.
-        prior_mean, prior_cov: The original (un-normalized) prior parameters.
-        standardizer_x, standardizer_theta: The fitted standardizing nets.
-        initial_beta (float): Starting guess for beta.
-        target_coverage (float): The desired frequentist coverage (e.g., 0.95).
-        num_iterations (int): Number of iterations for the stochastic approximation.
-        num_bootstraps (int): Number of bootstrap samples to estimate coverage at each iteration.
-        learning_rate_fn (function): Step size schedule for beta updates.
-        beta_min (float): Lower bound for beta to prevent collapse.
+    Parameters
+    ----------
+    x_obs : torch.Tensor
+        The original observed data, shape (n, d_x).
+    model : ConjugateModel
+        Trained NSM-Bayes-conj model (networks and standardizers).
+    prior_mean : torch.Tensor
+        The original (un-normalized) prior mean.
+    prior_cov : torch.Tensor
+        The original (un-normalized) prior covariance.
+    initial_beta : float, default 0.1
+        Starting guess for beta.
+    target_coverage : float, default 0.95
+        The desired frequentist coverage (e.g., 0.95).
+    num_iterations : int, default 50
+        Number of iterations for the stochastic approximation.
+    num_bootstraps : int, default 200
+        Number of bootstrap samples to estimate coverage at each iteration.
+    c : float, default 1.0
+        Scale parameter of the IMQ weight.
+    learning_rate_fn : callable, default lambda t: 10.0 / (t + 10)
+        Step size schedule for beta updates.
+    max_log_step : float, default 0.25
+        Cap on ``k_t * (coverage error)`` per log-beta update.
+    beta_min : float, default 0.01
+        Lower bound for beta to prevent collapse.
 
-    Returns:
-        float: The final calibrated value for beta.
-        dict: A history of beta values and empirical coverages during training.
+    Returns
+    -------
+    float
+        The final calibrated value for beta.
+    dict
+        A history of beta values and empirical coverages during training.
     """
     print("--- Starting General Posterior Calibration for beta ---")
     
@@ -427,20 +525,17 @@ def calibrate_beta_gpc(
     # --- Step 0: Establish the "Ground Truth" Parameter for the Bootstrap ---
     x_obs_normalized = model.standardizer_x(x_obs)
     mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
-    Sigma_inv_obs = torch.linalg.inv(
-        Sigma_hat_obs + 1e-6 * torch.eye(x_obs.shape[1], device=x_obs.device, dtype=x_obs.dtype)
-    )
-    c_obs = 1.
+    Sigma_inv_obs = sigma_inverse(Sigma_hat_obs)
 
     # NSM-only minimiser (in normalized theta space)
     theta_hat_norm_true = compute_theta_hat_true_case1(
         x_obs_normalized,
-        model.T_phi_net,
-        model.b_phi_net,
-        w_imq_squared,
+        model.T_phi,
+        model.b_phi,
+        imq_weight,
         mu_hat_obs,
         Sigma_inv_obs,
-        c_obs,
+        c,
     )
     
     # Transform back to original theta scale
@@ -472,15 +567,12 @@ def calibrate_beta_gpc(
             # b. Compute posterior for the bootstrap sample using the current beta
             x_boot_normalized = model.standardizer_x(x_boot)
             mu_hat_boot, Sigma_hat_boot = robust_mean_cov(x_boot_normalized)
-            Sigma_inv_boot = torch.linalg.inv(
-                Sigma_hat_boot + 1e-6 * torch.eye(x_boot.shape[1], device=x_obs.device, dtype=x_obs.dtype)
-            )
-            c_boot = 1.
+            Sigma_inv_boot = sigma_inverse(Sigma_hat_boot)
 
-            mu_boot_norm, Sigma_boot_norm = compute_posterior_case1(
+            mu_boot_norm, Sigma_boot_norm = compute_posterior_conjugate(
                 x_boot_normalized, model, beta,
                 prior_mean_normalized, prior_cov_normalized,
-                w_imq_squared, mu_hat_boot, Sigma_inv_boot, c_boot
+                imq_weight, mu_hat_boot, Sigma_inv_boot, c
             )
 
             # c. Construct credible region (by un-normalizing) and check coverage
@@ -488,9 +580,7 @@ def calibrate_beta_gpc(
             Sigma_boot_orig = Sigma_boot_norm * torch.outer(scales, scales)
             
             # Ensure covariance is invertible
-            Sigma_inv_boot_orig = torch.linalg.inv(
-                Sigma_boot_orig + 1e-6 * torch.eye(d_theta, device=x_obs.device, dtype=x_obs.dtype)
-            )
+            Sigma_inv_boot_orig = sigma_inverse(Sigma_boot_orig)
             diff = theta_hat_true - mu_boot_orig
             
             # d. Check if theta_hat_true is inside the credible region

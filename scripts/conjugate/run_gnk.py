@@ -1,5 +1,4 @@
 import pickle
-import random
 import time
 from pathlib import Path
 
@@ -8,13 +7,15 @@ import numpy as np
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
-from nsm_bayes.gpc import calibrate_beta_gpc
 
+from nsm_bayes.gpc import calibrate_beta_gpc
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.simulators.add_noise import add_outliers_by_proportion
 from nsm_bayes.simulators.benchmark_simulators.simulators import (
     GandKSimulator,
 )
+from nsm_bayes.utils import set_seed
+
 
 def _run(cfg: DictConfig, save_dir: Path):
     #####------Load config values-----######
@@ -39,9 +40,7 @@ def _run(cfg: DictConfig, save_dir: Path):
     all_thetas = []
     
     for ind in range(num_repeat):
-        random.seed(ind+1)
-        np.random.seed(ind+1)
-        torch.manual_seed(ind+1)
+        set_seed(cfg.seed_offset + ind)
         d_theta = prior_mean.shape[0]  # Number of parameters
         d_x = 1 # Data dimension
         #######-------Generate training data-----######
@@ -50,7 +49,10 @@ def _run(cfg: DictConfig, save_dir: Path):
         # Generate simulations
         theta = prior.sample((num_samples,))
         x_sim = sim.simulate(theta).unsqueeze(-1)
-        
+
+        # Store theta for CSV
+        all_thetas.append(theta.detach().cpu().numpy())
+
         with open(save_dir/ f"x_sim_{ind}.pkl", "wb") as f:
             pickle.dump(x_sim, f)
         
@@ -103,7 +105,6 @@ def _run(cfg: DictConfig, save_dir: Path):
             target_coverage=1.0 - cfg.alpha,
             num_iterations=cfg.T,        # Number of updates to beta
             num_bootstraps=cfg.B,        # B, number of samples to estimate coverage
-            learning_rate_fn = lambda t: 10.0 / (t + 10.)
         )
 
         mu_n, Sigma_n = model.calibrated_posterior(
@@ -137,7 +138,7 @@ def _run(cfg: DictConfig, save_dir: Path):
     np.savetxt(save_dir / "theta_all.csv", thetas_array, delimiter=",")
     
 
-@hydra.main(version_base=None, config_path="../configs", config_name="gnk")
+@hydra.main(version_base=None, config_path="../../configs", config_name="gnk")
 def run_gnk(cfg: DictConfig):
     """Hydra entry point for the run_gnk experiment."""
     save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name

@@ -7,7 +7,9 @@ from __future__ import annotations
 import torch
 from torch.distributions import Binomial, MultivariateNormal, NegativeBinomial, Poisson
 
-
+# Small constants that only guard against division by zero / clamp bounds.
+EPS6 = 1e-6
+EPS8 = 1e-8
 class SIRSimulator:
     """Simulator for the SIR epidemiological model.
 
@@ -207,7 +209,7 @@ class SIRSimulator:
                 y[:, t] = Poisson(mu).sample()
             else:
                 # One common NegBin parameterization: mean mu, variance mu + mu^2/phi
-                probs = (phi / (phi + mu + 1e-8)).clamp(1e-6, 1 - 1e-6)
+                probs = (phi / (phi + mu + EPS8)).clamp(EPS6, 1 - EPS6)
                 y[:, t] = NegativeBinomial(total_count=phi, probs=probs).sample()
 
         if output == "moments":

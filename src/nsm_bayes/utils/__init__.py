@@ -1,10 +1,10 @@
 """Shared utilities for MCMC sampling and robust statistics."""
 from nsm_bayes.utils.utils import (
-    run_mcmc,
     sample_mean_and_covariance,
+    set_seed,
 )
 
 __all__ = [
-    "run_mcmc",
     "sample_mean_and_covariance",
+    "set_seed",
 ]

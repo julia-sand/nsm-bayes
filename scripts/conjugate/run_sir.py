@@ -1,31 +1,45 @@
-import csv
 import pickle
 import time
 from pathlib import Path
+
 import hydra
 import numpy as np
 import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
 
+from nsm_bayes.gpc import calibrate_beta_gpc
 from nsm_bayes.models.conjugate import ConjugateModel
-from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.models.general import train_normflow
+from nsm_bayes.models.general.normflow import run_mcmc
 from nsm_bayes.simulators.add_noise import simulate_contaminated_dataset
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import run_mcmc
+from nsm_bayes.utils import set_seed
+
 
 def _run(cfg: DictConfig, save_dir: Path):
     #####------Load config values-----######
     num_repeat = cfg.num_repeat # Number of repetitions of the experiment
     num_sim = cfg.num_samples # Number of training data samples
     dtype = torch.float32
+    prior_mean = torch.tensor([
+            torch.log(torch.tensor(cfg.prior_mean[0])),         # log beta
+            torch.log(torch.tensor(cfg.prior_mean[1])),        # log gamma
+            torch.logit(torch.tensor(cfg.prior_mean[2])),        # logit rho
+            torch.log(torch.tensor(cfg.prior_mean[3])),           # log I0
+            ],  dtype=dtype)
+    prior_std  = torch.tensor(cfg.prior_std,  dtype=dtype) 
+    prior_cov = torch.diag(prior_std ** 2) # Prior covariance matrix
+    theta_true = torch.tensor([
+        torch.log(torch.tensor(cfg.theta_true[0])),
+        torch.log(torch.tensor(cfg.theta_true[1])),
+        torch.logit(torch.tensor(cfg.theta_true[2])),
+        torch.log(torch.tensor(cfg.theta_true[3]))], dtype=dtype) # True parameter value 
     # Initialize simulator
     sim = SIRSimulator(
         obs_model=cfg.obs_model if "obs_model" in cfg else "poisson",
-        prior_mean=cfg.prior_mean if "prior_mean" in cfg else None,
-        prior_cov=cfg.prior_cov if "prior_cov" in cfg else None,
+        prior_mean=prior_mean,
+        prior_cov=prior_cov
     )
     prior = sim.prior()
     prior_mean = prior.loc
@@ -42,7 +56,7 @@ def _run(cfg: DictConfig, save_dir: Path):
     all_thetas = []
     
     for ind in range(num_repeat):
-        torch.manual_seed(ind+123)
+        set_seed(cfg.seed_offset + ind)
         d_theta = prior_mean.shape[0]  # Number of parameters
         d_x = cfg.d_x # Data dimension
         #######-------Generate training data-----######
@@ -131,7 +145,6 @@ def _run(cfg: DictConfig, save_dir: Path):
             target_coverage=1.0 - cfg.alpha,
             num_iterations=cfg.T,        # Number of updates to beta
             num_bootstraps=cfg.B,        # B, number of samples to estimate coverage
-            learning_rate_fn = lambda t: 10.0 / (t + 10.),
             beta_min = cfg.beta_min_case1
         )
         
@@ -162,10 +175,13 @@ def _run(cfg: DictConfig, save_dir: Path):
     # Save all thetas into one CSV file
     thetas_array = np.concatenate(all_thetas, axis=0)
     np.savetxt(save_dir / "theta_all.csv", thetas_array, delimiter=",")
-if __name__ == "__main__":
-    pass
-@hydra.main(version_base=None, config_path="../configs", config_name="sir")
+
+@hydra.main(version_base=None, config_path="../../configs", config_name="sir")
 def run_sir(cfg: DictConfig):
     """Hydra entry point for the run_sir experiment."""
     save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
     _run(cfg=cfg, save_dir=save_dir)
+
+
+if __name__ == "__main__":
+    run_sir()

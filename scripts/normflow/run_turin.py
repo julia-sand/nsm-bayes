@@ -7,16 +7,17 @@ import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
+from nsm_bayes.gpc import calibrate_beta
 from nsm_bayes.method import (
     ScoreMatchingLogPosterior,
     robust_mean_cov,
-    imq_weight,
+    sigma_inverse,
 )
 from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.models.general.normflow import run_mcmc
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
 from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.models.general.normflow import run_mcmc
+from nsm_bayes.utils import set_seed
 
 
 def _run(cfg: DictConfig, save_dir: Path):
@@ -42,9 +43,9 @@ def _run(cfg: DictConfig, save_dir: Path):
         B=cfg.B_hz,
         Ns=cfg.Ns,
         device=cfg.device,
-        prior_mean=cfg.prior_mean if "prior_mean" in cfg else None,
-        prior_cov=cfg.prior_cov if "prior_cov" in cfg else None,
-    )
+        prior_mean=torch.tensor(list(cfg.prior_mean), dtype=dtype) if "prior_mean" in cfg else None,
+        prior_cov=torch.tensor([list(r) for r in cfg.prior_cov], dtype=dtype) if "prior_cov" in cfg else None,
+        )
 
     # Gaussian prior (configs/turin.yaml)
     prior = sim.prior()
@@ -55,7 +56,7 @@ def _run(cfg: DictConfig, save_dir: Path):
 
     for ind in range(num_repeat):
 
-        torch.manual_seed(ind + 123)
+        set_seed(cfg.seed_offset + ind)
 
         #######-------Generate training data-----######
         start_time = time.perf_counter() # Record the start time
@@ -117,10 +118,9 @@ def _run(cfg: DictConfig, save_dir: Path):
             pickle.dump(samples_nle_mis, f)
 
         #######-------Run neural score-matching Bayes------#######
-        c = 1.
 
         mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
-        Sigma_inv = torch.linalg.inv(Sigma_hat + 1e-6 * torch.eye(d_x, device=x_obs_mis.device, dtype=x_obs_mis.dtype))
+        Sigma_inv = sigma_inverse(Sigma_hat)
 
         start_time = time.perf_counter()
         # Initial run of MCMC
@@ -129,7 +129,7 @@ def _run(cfg: DictConfig, save_dir: Path):
             prior=prior,
             beta=cfg.beta_base_general,
             q_phi_log_prob=likelihood_estimator,
-            mu_hat=mu_hat, Sigma_inv=Sigma_inv, c=c, weight_type="imq"
+            mu_hat=mu_hat, Sigma_inv=Sigma_inv, weight_type="imq"
         )
 
         theta_samples_base = run_multivariate_slice_sampler_tuned(
@@ -143,7 +143,7 @@ def _run(cfg: DictConfig, save_dir: Path):
             sm_lp = ScoreMatchingLogPosterior(
                 x_obs=x_obs_mis, prior=prior, beta=beta_new,
                 q_phi_log_prob=likelihood_estimator,
-                mu_hat=mu_hat, Sigma_inv=Sigma_inv, c=c, weight_type="imq"
+                mu_hat=mu_hat, Sigma_inv=Sigma_inv, weight_type="imq"
             )
             arr = run_multivariate_slice_sampler_tuned(
                 log_posterior_fn=sm_lp, prior=prior,
@@ -159,11 +159,9 @@ def _run(cfg: DictConfig, save_dir: Path):
             mu_hat=mu_hat,
             Sigma_inv=Sigma_inv,
             weight_type="imq",
-            c=c,
             alpha=cfg.alpha,
             B=cfg.B,
             T=cfg.T,
-            step_schedule=lambda t: 10.0/(t+10.),
             beta_min=cfg.beta_min_general,
             refresh_sampler=refresh_sampler_at
         )
@@ -175,7 +173,6 @@ def _run(cfg: DictConfig, save_dir: Path):
             q_phi_log_prob=likelihood_estimator,
             mu_hat=mu_hat,
             Sigma_inv=Sigma_inv,
-            c=c,
             weight_type="imq"
         )
 
@@ -207,11 +204,12 @@ def _run(cfg: DictConfig, save_dir: Path):
         
         print("Iteration number: ", ind)
 
-if __name__ == "__main__":
-    pass
-
-@hydra.main(version_base=None, config_path="../configs", config_name="turin")
+@hydra.main(version_base=None, config_path="../../configs", config_name="turin")
 def run_turin(cfg: DictConfig):
     """Hydra entry point for the run_turin experiment."""
     save_dir = (Path(get_original_cwd()) / "data" / cfg.experiment_name / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}")
     _run(cfg=cfg, save_dir=save_dir)
+
+if __name__ == "__main__":
+    run_turin()
+

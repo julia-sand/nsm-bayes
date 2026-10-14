@@ -7,7 +7,8 @@ from __future__ import annotations
 import torch
 from torch.distributions import MultivariateNormal
 
-
+# Small constant that only guards log(0).
+EPS = 1e-12
 class TurinSimulator:
     """Simulator for the Turin channel model.
 
@@ -257,7 +258,7 @@ class TurinSimulator:
         elif output == "data":
             y_td = torch.fft.ifft(Y[:nRx, :], dim=1)
             p = torch.abs(y_td) ** 2
-            p_dB = 10 * torch.log10(p + 1e-12)
+            p_dB = 10 * torch.log10(p + EPS)
             delta_f = self.B / (self.Ns - 1)
             tau = torch.linspace(0, 1 / delta_f, self.Ns, device=self.device)
             return (

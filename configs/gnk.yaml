@@ -33,6 +33,8 @@ alpha: 0.05              # 1-alpha credible set
 
 hidden_dim: 128          # Hidden dimension of neural network used in case 1
 
+seed_offset: 1            # RNG seed = seed_offset + repeat index (gnk used ind+1)
+
 d_x: 1
 
 
