@@ -30,4 +30,4 @@ class BphiNet(nn.Module):
                     module.bias.data.fill_(0.01)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.network(x)
+        return self.network(x).squeeze(-1)

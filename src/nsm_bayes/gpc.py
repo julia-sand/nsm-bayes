@@ -103,7 +103,6 @@ def reweight_for_bootstrap_beta(
     W = W / (W.sum(dim=1, keepdim=True) + EPS)
     return W
 
-
 def weighted_mean_cov(
     theta_samples: torch.Tensor,
     w: torch.Tensor,
@@ -148,11 +147,11 @@ def weighted_quantile(values: torch.Tensor, w: torch.Tensor, q: float):
     return v[torch.searchsorted(cdf, torch.tensor(q, device=v.device))]
 
 def bootstrap_coverage_indicator(
-    theta_samples: torch.Tensor,   # (M, d)
-    weights_row: torch.Tensor,     # (M,)
-    theta_hat: torch.Tensor,       # (d,)
-    alpha: float
-) -> int:
+        theta_samples: torch.Tensor,   # (M, d)
+        weights_row: torch.Tensor,     # (M,)
+        theta_hat: torch.Tensor,       # (d,)
+        alpha: float
+        ) -> int:   
     w = weights_row / (weights_row.sum() + EPS)
     mu, Sigma = weighted_mean_cov(theta_samples, w)
     Sigma_inv = sigma_inverse(Sigma)
@@ -179,7 +178,7 @@ def calibrate_beta(
     beta_min: float = 0.01,
     ess_threshold: float = 0.3,
     refresh_sampler: Callable[[float], torch.Tensor] | None = None,
-) -> tuple[float, dict]:
+    ) -> tuple[float, dict]:
     """
     Calibrate beta via bootstrap coverage matching for NSM-Bayes.
 
@@ -342,10 +341,9 @@ def calibrate_beta(
 
 ######-------Function needed for general posterior calibration (setting the learning rate) for NSM-Bayes-conj------#########
 
-def compute_theta_hat_true_case1(
+def compute_theta_hat_true_conjugate(
     x_obs: torch.Tensor,
-    T_phi: torch.nn.Module,
-    b_phi: torch.nn.Module,
+    model,
     weight_fn,
     mu_hat_obs: torch.Tensor,
     Sigma_inv_obs: torch.Tensor,
@@ -362,10 +360,10 @@ def compute_theta_hat_true_case1(
     ----------
     x_obs : torch.Tensor
         (n, d_x) observed data (already normalized if you use standardizer_x).
-    T_phi : torch.nn.Module
-        Network mapping x to the natural parameters.
-    b_phi : torch.nn.Module
-        Network mapping x to the log-partition term.
+    model : object
+        Model exposing ``model.T_phi`` (network mapping x to the natural
+        parameters) and ``model.b_phi`` (network mapping x to the
+        log-partition term).
     weight_fn : callable
         Function ``w^2(x)`` used elsewhere.
     mu_hat_obs : torch.Tensor
@@ -389,8 +387,8 @@ def compute_theta_hat_true_case1(
     # A = sum_i w2_i * J_T(x_i)^T J_T(x_i)   (d_theta, d_theta)
     # The networks are not batched: vmap them with in_dim=None. get_cov_term_
     # single(xi, fn) returns (J_T^T J_T, J_T); only the covariance term is kept.
-    batched_cov_terms, _ = vmap(get_cov_term_single, in_dims=(0, None))(
-        x_obs, T_phi
+    batched_cov_terms = vmap(get_cov_term_single, in_dims=(0, None))(
+        x_obs, model.T_phi
     )  # (n, d_theta, d_theta)
     A = (w2.view(-1, 1, 1) * batched_cov_terms).sum(dim=0)  # (d_theta, d_theta)
 
@@ -400,19 +398,19 @@ def compute_theta_hat_true_case1(
     # Jacobians are recomputed per point and w2 is applied outside, since this
     # helper takes no weights.
     batched_non_div_terms = vmap(
-        get_non_div_term_single, in_dims=(0, None, None, None, None)
-    )(x_obs, T_phi, b_phi, None, None)  # (n, d_theta)
+        get_non_div_term_single, in_dims=(0, None, None)
+    )(x_obs, model.T_phi, model.b_phi)  # (n, d_theta)
     term_non_div = (w2.view(-1, 1) * batched_non_div_terms).sum(dim=0)  # (d_theta,)
 
     # term_div = sum_i div_x[ w(x_i)^2 * score_x(x_i) ]  (vector in R^{d_theta})
     # get_div_term_single(xi, model, w2, grad_w2) reads model.T_phi itself and
     # weights by w2 inside, so it is NOT re-applied when reducing below.
     batched_divergences = vmap(get_div_term_single, in_dims=(0, None, 0, 0))(
-        x_obs, T_phi, w2, grad_w2
+        x_obs, model.T_phi, w2, grad_w2
     )  # (n, d_theta)
     term_div = batched_divergences.sum(dim=0)  # (d_theta,)
 
-    B = term_non_div - term_div  # (d_theta,)
+    B = term_non_div + term_div  # (d_theta,)
 
     # ---------- 3. Solve A * theta_hat_true = -B ----------
     d_theta = A.shape[0]
@@ -500,10 +498,9 @@ def calibrate_beta_gpc(
     Sigma_inv_obs = sigma_inverse(Sigma_hat_obs)
 
     # NSM-only minimiser (in normalized theta space)
-    theta_hat_norm_true = compute_theta_hat_true_case1(
+    theta_hat_norm_true = compute_theta_hat_true_conjugate(
         x_obs_normalized,
-        model.T_phi,
-        model.b_phi,
+        model,
         imq_weight,
         mu_hat_obs,
         Sigma_inv_obs,
@@ -513,6 +510,7 @@ def calibrate_beta_gpc(
     # Transform back to original theta scale
     theta_hat_true = theta_hat_norm_true * scales + model.standardizer_theta.mean
     print("Estimated true theta: ", theta_hat_true.detach())
+    
     # --- Start the Iterative Calibration Process ---
     beta = initial_beta
     log_beta = math.log(initial_beta)

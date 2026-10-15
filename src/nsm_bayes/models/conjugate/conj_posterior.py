@@ -1,18 +1,19 @@
 """Conjugate (neural exponential family) posterior computation."""
 import torch
-from torch.func import jacrev, vmap
+from torch.func import vmap
 
 
 from nsm_bayes.utils.linalg import (
     get_cov_term_single,
     get_non_div_term_single,
     sigma_inverse,
+    get_div_term_single
 )
 
 
 #######----Function to compute posterior precision matrix for NSM-Bayes-conj----######
 def compute_posterior_precision_conjugate(
-    x_obs, model, beta, prior_cov_inv, weight_fn, mu_hat_obs, Sigma_inv_obs, c
+    x_obs, model, beta, prior_cov_inv, weights, mu_hat_obs, Sigma_inv_obs, c
 ):
     """
     Computes the posterior precision matrix (inverse covariance) for the model.
@@ -20,10 +21,9 @@ def compute_posterior_precision_conjugate(
     """
 
     # Vectorize the calculation over all observations
-    batched_cov_terms,_ = vmap(get_cov_term_single)(x_obs,model.T_phi) # shape: (n, d_theta, d_theta)
-
-    # Apply weights and sum
-    weights = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1, 1)
+    batched_cov_terms = vmap(get_cov_term_single, in_dims=(0, None))(
+                                                x_obs, model.T_phi
+                                                    )  # shape: (n, d_theta, d_theta)
 
     sum_term = (weights * batched_cov_terms).sum(dim=0)
 
@@ -47,21 +47,24 @@ def compute_posterior_conjugate(
     prior_cov_inv = sigma_inverse(prior_cov)
     #torch.linalg.inv(prior_cov)
     
+    # Apply weights and sum
+    weights_h,grad_w2 = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c)#.view(-1, 1, 1)
+
     # 1. Compute the posterior precision matrix
     Sigma_n_inv = compute_posterior_precision_conjugate(
-        x_obs, model, beta, prior_cov_inv, weight_fn, mu_hat_obs, Sigma_inv_obs, c
+        x_obs, model, beta, prior_cov_inv, weights_h, mu_hat_obs, Sigma_inv_obs, c
     )
 
     # --- 2. Calculate terms needed for the posterior mean ---
-
-
-    batched_non_div_terms = vmap(get_non_div_term_single, in_dims=(0, None))(x_obs,model)
-    weights_h,grad_w2 = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c)
+    batched_non_div_terms = vmap(get_non_div_term_single, in_dims=(0, None, None))(x_obs,model.Tphi,model.bphi)
+    
+    #weights_h,grad_w2 = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c)
+    
     term_non_div = (weights_h * batched_non_div_terms).sum(dim=0)
 
     batched_divergences = vmap(
         get_div_term_single, in_dims=(0, None, None, None, None)
-                 )(x_obs, model, w2=weights_h,grad_w2=grad_w2)          # (n, d_theta)
+                 )(x_obs, model.T_phi, w2=weights_h,grad_w2=grad_w2)          # (n, d_theta)
     
     #batched_divergences = vmap(get_div_term_single)(x_obs)
     term_div = batched_divergences.sum(dim=0)
@@ -77,8 +80,6 @@ def compute_posterior_conjugate(
 
     # --- 4. Compute Posterior Covariance from Precision ---
     
-    # Use a numerically stable Cholesky-based inverse
-    #L = torch.linalg.cholesky(Sigma_n_inv)
     Sigma_n = sigma_inverse(Sigma_n_inv)#torch.cholesky_inverse(L)
     
     return mu_n, Sigma_n

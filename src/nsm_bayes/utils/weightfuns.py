@@ -21,7 +21,6 @@ def _squeeze(x, w2, grad_w2):
         return w2.squeeze(0), grad_w2.squeeze(0)
     return w2, grad_w2
 
-
 def _as_batch(x):
     """Promote a (d_x,) row to (1, d_x)."""
     return x.unsqueeze(0) if x.ndim == 1 else x
@@ -130,7 +129,7 @@ def huber_weight(x, mu_hat, Sigma_inv, c=1.0):
     inside = r2 <= c ** 2                   # equivalent to r <= c
 
     w2 = torch.where(inside, torch.ones_like(r2), c ** 2 / r2)
-    grad_outside = -2.0 * c ** 2 / r2 ** 4
+    grad_outside = -2.0 * c ** 2 / r2 ** 2 #was 4?
     grad_w2 = torch.where(
         inside.unsqueeze(-1), torch.zeros_like(Sd), grad_outside.unsqueeze(-1) * Sd
     )

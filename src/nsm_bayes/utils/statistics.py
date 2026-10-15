@@ -13,7 +13,7 @@ def median_heuristic(x):
     return med**2
 
 
-#######----Function to compute robust mean and covariance in the weights w_IMQ----######
+#######----Function to compute robust mean and covariance ----######
 def robust_mean_cov(x_obs):
     """
     Computes component-wise median and robust Minimum Covariance Determinant estimator.
@@ -73,9 +73,12 @@ def estimate_stats(x_obs: torch.Tensor, robust: bool):
     Mirrors the statistics used by the general-method posterior: robust
     (median / MCD) estimates when `robust` is true, plain sample moments
     otherwise, with the covariance inverted by :func:`sigma_inverse`.
+
+    Returns mean and inverse covariance
     """
     if robust:
         mu_hat, Sigma_hat = robust_mean_cov(x_obs)
     else:
         mu_hat, Sigma_hat = sample_mean_and_covariance(x_obs)
+    
     return mu_hat, sigma_inverse(Sigma_hat)

@@ -1,7 +1,6 @@
 """Contains functions for adding outliers and noise to datasets for testing inference"""
 import torch
 
-# Small constant that only guards the scale estimate from collapsing to zero.
 from torch.distributions import Binomial, StudentT
 
 
@@ -98,7 +97,7 @@ def add_student_t_noise(
     corrupted_indices = perm[:num_corrupt]
 
     # Estimate scale per dimension (using all samples)
-    if use_robust_scale:
+    if use_robust_scale: #does this ever get used? 
         median = x_obs.median(dim=0).values
         mad = (x_obs - median).abs().median(dim=0).values
         scale = 1.4826 * mad + eps
@@ -177,7 +176,7 @@ def simulate_contaminated_dataset(
         theta_used[is_contam] = theta_contam
     else:
         # Fallback: just use theta_true for now or a fixed offset
-        theta_used[is_contam] = theta_true
+        theta_used[is_contam] = theta_true+1
 
     # Simulate data
     y_obs_mis = simulate_fn(theta_used, T=T, N=N)

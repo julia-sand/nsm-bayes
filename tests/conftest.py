@@ -200,8 +200,6 @@ def _fast_runs(monkeypatch):
         return orig_train_q_phi(*args, **kwargs)
     monkeypatch.setattr(conj_train, "train_q_phi", _fast_train_q_phi)
 
-    # Keep MCMC/sampler chatter out of the captured test output.
-    monkeypatch.setenv("SLICK_QUIET", "1")
     yield
 
 

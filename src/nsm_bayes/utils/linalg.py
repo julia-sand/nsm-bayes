@@ -1,15 +1,9 @@
 """Shared utilities for MCMC sampling and robust statistics."""
 from __future__ import annotations
 
-import random
-
 import numpy as np
 import torch
 from torch.func import jacfwd, jacrev
-
-# Small constant that keeps the relative-jitter scale in `safe_cholesky`
-# from collapsing to zero when the data scale is tiny.
-_EPS = 1e-12
 
 
 def safe_cholesky(Sigma: torch.Tensor, max_tries: int = 6) -> torch.Tensor:
@@ -22,10 +16,10 @@ def safe_cholesky(Sigma: torch.Tensor, max_tries: int = 6) -> torch.Tensor:
     L, info = torch.linalg.cholesky_ex(Sigma)
     if info == 0:
         return L
-    d = Sigma.shape[-1]
-    eye = torch.eye(d, device=Sigma.device, dtype=Sigma.dtype)
-    scale = Sigma.diagonal().mean().abs().clamp_min(_EPS)
-    jitter = 1e-8 * scale
+    
+    eye = torch.eye(Sigma.shape[-1], device=Sigma.device, dtype=Sigma.dtype)
+    #scale = Sigma.diagonal().mean().abs().clamp_min(_EPS)
+    jitter = 1e-8 #* scale
     for _ in range(max_tries):
         L, info = torch.linalg.cholesky_ex(Sigma + jitter * eye)
         if info == 0:
@@ -56,7 +50,7 @@ def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor
         If the variance is not finite or is non-positive in the scalar case.
     """
     if Sigma_hat.numel() == 1:   # scalar variance (d_x = 1)
-        var = Sigma_hat.reshape(1, 1) + jitter
+        var = Sigma_hat.reshape(1, 1)# + jitter
         if not torch.isfinite(var).all():
             raise ValueError(
                 f"Variance estimate is not finite ({var.item()}); "
@@ -74,11 +68,23 @@ def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor
     L = safe_cholesky(Sigma_hat) #adds jitter here
     return torch.cholesky_inverse(L)
 
-
-
 def _single(fn):
     """Wrap fn: (1, d_x) -> (1, d_out) as (d_x,) -> (d_out,)."""
     return lambda x: fn(x.unsqueeze(0)).squeeze(0)
+
+
+def _squeeze_scalar_jacobian(J, xi, fn):
+    """Squeeze the output dim of J if fn is scalar-valued.
+
+    When fn maps to a scalar (output shape (1,) in batched mode),
+    jacrev returns J with shape (1, d_x). Squeeze to (d_x,) so
+    downstream code treats it as a 1-D gradient vector.
+    """
+    if J.dim() == 2 and J.shape[0] == 1:
+        out = fn(xi.unsqueeze(0)).squeeze(0)
+        if out.dim() == 1 and out.shape[0] == 1:
+            J = J.squeeze(0)
+    return J
 
 
 def jacobian_with_spare(xi, fn):
@@ -87,14 +93,17 @@ def jacobian_with_spare(xi, fn):
     fn maps (1, d_x) -> (1, d_out), e.g. model.T_phi or model.b_phi.
     jacfwd differentiates the first output (-> Hessian) and passes the
     second through as aux (-> Jacobian), so J is computed only once.
+
+    If fn is scalar-valued, J is squeezed from (1, d_x) to (d_x,).
     """
-    #fn_single = lambda x: fn(x.unsqueeze(0)).squeeze(0)   # (d_x,) -> (d_out,)
     J = jacrev(_single(fn))(xi)                              # (d_out, d_x)
+    J = _squeeze_scalar_jacobian(J, xi, fn)
     return J, J
 
 def jacobian(xi, fn):
-    """(d_out, d_x)"""
-    return jacrev(_single(fn))(xi)
+    """(d_out, d_x), or (d_x,) if fn is scalar-valued."""
+    J = jacrev(_single(fn))(xi)
+    return _squeeze_scalar_jacobian(J, xi, fn)
 
 
 def jacobian_and_hessian(xi, fn):
@@ -113,9 +122,9 @@ def get_cov_term_single(xi, fn, Jac=None):
     if Jac is None:
         Jac = jacobian(xi, fn)
 
-    return Jac @ Jac.T, Jac
+    return Jac @ Jac.T
 
-# --- 2a. Vectorized Non-Divergence Term (h_n) ---
+# --- Non-Divergence Term (h_n) ---
 def get_non_div_term_single(xi, fn1, fn2, Jac1=None, Jac2=None):
 
     if Jac1 is None:
@@ -125,22 +134,14 @@ def get_non_div_term_single(xi, fn1, fn2, Jac1=None, Jac2=None):
     
     return Jac1 @ Jac2
 
-
-# --- 2b. Vectorized Divergence Term (D_n) 
+#Divergence term
 def get_div_term_single(xi,fn,w2,grad_w2):
 
     # 1. Compute Laplacian of T_phi: Tr(Hess(T_phi))
-    # T_phi_wrapped: (d_x) -> (d_theta)
-    # Hessian: (d_theta, d_x, d_x)
     jac_T,lap_T  = jacobian_and_laplacian(xi,fn)
-    #jacfwd(jacobian_with_spare, has_aux=True)(xi, model.T_phi)   # (d_θ, d_x, d_x), (d_θ, d_x)
-    #laplacian_T = torch.diagonal(hess_T, dim1=1, dim2=2).sum(dim=1) # shape: (d_theta,)
 
     grad_w2 = grad_w2.squeeze(0)
     
-    # grad_w2: (d_x,)
-    # jac_T: (d_theta, d_x)
-    # laplacian_T: (d_theta,)
     divergence = grad_w2 @ jac_T.T + w2 * lap_T
     
     return divergence

@@ -24,7 +24,7 @@ from nsm_bayes.gpc import calibrate_beta_gpc
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.general import train_normflow
 from nsm_bayes.models.general.normflow import (
-    _sample_general_posterior,
+    sample_general_posterior,
     calibrate_beta_normflow,
     run_mcmc,
 )
@@ -152,7 +152,7 @@ def run_normflow_methods(
             warmup_steps=cfg.warmup_steps,
             thin=cfg.thin,
         )
-        samples_sm_general = _sample_general_posterior(
+        samples_sm_general = sample_general_posterior(
             x_obs_mis, prior, flow, beta, mu_hat, Sigma_inv, cfg
         )
     save(save_dir, "samples_sm_general", rep, samples_sm_general)

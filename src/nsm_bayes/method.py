@@ -132,7 +132,7 @@ def score_matching_loss_general_vmap(
     def per_x_loss(xi: torch.Tensor) -> torch.Tensor:
         if use_hutch:
             # score wrt x
-            score = jacobian(log_q_xonly)(xi)  # (d_x,)
+            score = jacobian(xi,log_q_xonly)  # (d_x,)
             # Hutchinson estimate of the Hessian trace
             g = fgrad(log_q_xonly)  # ∇_x log q
             def one_probe(v):
@@ -201,11 +201,5 @@ class ScoreMatchingLogPosterior:
             )
 
         return float(lp - (self.beta * self.n_obs * L_sm))
-
-
-
-# ===========================================================================================
-# PART 2: Functions needed for NSM-Bayes-conj method
-# ===========================================================================================
 
 

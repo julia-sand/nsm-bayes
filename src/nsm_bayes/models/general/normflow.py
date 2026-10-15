@@ -23,7 +23,6 @@ from nsm_bayes.gpc import calibrate_beta
 from nsm_bayes.method import ScoreMatchingLogPosterior
 from nsm_bayes.models.general.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils.statistics import estimate_stats
-from nsm_bayes.utils.linalg import sigma_inverse
 
 __all__ = [
     "train_normflow",
@@ -32,10 +31,7 @@ __all__ = [
     "calibrate_beta_normflow",
 ]
 
-
-def train_normflow(
-    theta_sim: torch.Tensor,
-    x_sim: torch.Tensor,
+def make_normflow_model(
     prior: MultivariateNormal,
     density_estimator: str = "maf",
 ) -> "SNLE":
@@ -58,8 +54,39 @@ def train_normflow(
         Trained sbi density estimator whose ``log_prob(x, theta)`` evaluates
         ``log q_phi(x | theta)``.
     """
-    inference = SNLE(prior, density_estimator=density_estimator)
-    return inference.append_simulations(theta_sim, x_sim).train()
+    return SNLE(prior, density_estimator=density_estimator)
+
+def train_normflow(theta_sim: torch.Tensor,
+                            x_sim: torch.Tensor,
+                            prior: MultivariateNormal,
+                            density_estimator: str = "maf",
+                            ) -> "SNLE":
+    """Train a normalising-flow likelihood estimator on simulated data.
+
+    Parameters
+    ----------
+    theta_sim : torch.Tensor
+        Simulated parameters with shape ``(m, d_theta)``, drawn from `prior`.
+    x_sim : torch.Tensor
+        Simulated data with shape ``(m, d_x)`` corresponding to `theta_sim`.
+    prior : torch.distributions.MultivariateNormal
+        Prior distribution over the parameters.
+    density_estimator : str, default "maf"
+        Name of the sbi density estimator, e.g. ``"maf"`` or ``"mdn"``.
+
+        Returns
+    -------
+    torch.nn.Module
+        Trained sbi density estimator whose ``log_prob(x, theta)`` evaluates
+        ``log q_phi(x | theta)``.
+    """
+    
+    inference = make_normflow_model(prior,density_estimator)
+
+    #train the inference model
+    inference.append_simulations(theta_sim, x_sim).train()
+    
+    return inference
 
 
 def make_nle_logprob(estimator) -> Callable:
@@ -154,46 +181,6 @@ def run_mcmc(
     return posterior_samples
 
 
-
-def _sample_general_posterior(
-    x_obs: torch.Tensor,
-    prior: MultivariateNormal,
-    flow,
-    beta: float,
-    mu_hat: torch.Tensor,
-    Sigma_inv: torch.Tensor,
-    num_samples: int,
-    num_chains: int,
-    warmup_steps: int,
-    thin: int,
-) -> torch.Tensor:
-    """Draw slice-sampler posterior samples for the general method."""
-    sm_lp = ScoreMatchingLogPosterior(
-        x_obs=x_obs,
-        prior=prior,
-        beta=beta,
-        q_phi_log_prob=flow,
-        mu_hat=mu_hat,
-        Sigma_inv=Sigma_inv,
-        weight_type="imq",
-    )
-    samples = run_multivariate_slice_sampler_tuned(
-        log_posterior_fn=sm_lp,
-        prior=prior,
-        num_samples=num_samples,
-        num_chains=num_chains,
-        warmup_steps=warmup_steps,
-        thin=thin,
-    )
-    return torch.from_numpy(samples).to(x_obs.dtype).to(x_obs.device)
-
-def refresh_sampler_at(beta_new: float) -> torch.Tensor:
-    return _sample_general_posterior(
-        x_obs, prior, flow, beta_new, mu_hat, Sigma_inv,
-        num_samples, num_chains, warmup_steps, thin,
-    )
-
-
 def calibrate_beta_normflow(
     flow,
     x_obs: torch.Tensor,
@@ -260,10 +247,16 @@ def calibrate_beta_normflow(
     """
     mu_hat, Sigma_inv = estimate_stats(x_obs, robust)
 
-    theta_samples_base = _sample_general_posterior(
+    theta_samples_base = sample_general_posterior(
         x_obs, prior, flow, beta_base, mu_hat, Sigma_inv,
         num_samples, num_chains, warmup_steps, thin,
     )
+
+    def refresh_sampler_at(beta_new: float) -> torch.Tensor:
+        return sample_general_posterior(
+            x_obs, prior, flow, beta_new, mu_hat, Sigma_inv,
+            num_samples, num_chains, warmup_steps, thin,
+        )
 
     return calibrate_beta(
         theta_samples_base=theta_samples_base,

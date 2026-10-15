@@ -114,13 +114,16 @@ def _slice_sampler_1d_adaptive(log_p_1d, current_val, w=1.0, max_step_out=1000):
     left_bound = current_val - rand * w
     right_bound = left_bound + w
 
+    log_p_left = log_p_1d(left_bound)
+    log_p_right = log_p_1d(right_bound)
+
     # --- Stepping-out phase with limits ---
     for _ in range(max_step_out):
-        if log_p_1d(left_bound) <= slice_height or np.isneginf(log_p_1d(left_bound)):
+        if log_p_left <= slice_height or np.isneginf(log_p_left):
             break
         left_bound -= w
     for _ in range(max_step_out):
-        if log_p_1d(right_bound) <= slice_height or np.isneginf(log_p_1d(right_bound)):
+        if log_p_right <= slice_height or np.isneginf(log_p_right):
             break
         right_bound += w
 

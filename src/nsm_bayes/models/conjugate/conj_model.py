@@ -8,9 +8,8 @@ from nsm_bayes.models.conjugate.conj_posterior import (
 )
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
-from nsm_bayes.utils.statistics import robust_mean_cov,sample_mean_and_covariance
-from nsm_bayes.utils.linalg import sigma_inverse
-from nsm_bayes.utils.weightfuns import imq_weight
+from nsm_bayes.utils.statistics import estimate_stats
+from nsm_bayes.utils.weightfuns import weight_function
 
 
 class TorchStandardizer(nn.Module):
@@ -87,13 +86,9 @@ class ConjugateModel(nn.Module):
 
         #get the normalised model's mean and variance
         s, m = self.standardizer_theta.std, self.standardizer_theta.mean
-        
-        if robust: 
-            mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_n) #could be xobs here? 
-        else:
-            mu_hat_obs, Sigma_hat_obs = sample_mean_and_covariance(x_n)
 
-        Sigma_inv = sigma_inverse(Sigma_hat_obs)
+        mu_hat_obs, Sigma_inv = estimate_stats(x_n,robust=robust)
+        
         mu_n_normalized, Sigma_n_normalized = compute_posterior_conjugate(
                     x_n, self, beta,
                     self.standardizer_theta(prior_mean), prior_cov / torch.outer(s, s),
