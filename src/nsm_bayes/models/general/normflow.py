@@ -20,7 +20,6 @@ from sbi.inference import SNLE
 from torch.distributions import MultivariateNormal
 
 from nsm_bayes.gpc import calibrate_beta
-from nsm_bayes.method import ScoreMatchingLogPosterior
 from nsm_bayes.models.general.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils.statistics import estimate_stats
 

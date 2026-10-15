@@ -205,6 +205,7 @@ def run_conjugate_method(
             num_iterations=cfg.T,
             num_bootstraps=cfg.B,
             beta_min=cfg.get("beta_min_case1", 0.01),
+            robust=robust,
         )
         #compute robust posterior
         mu_n, Sigma_n = model.calibrated_posterior(

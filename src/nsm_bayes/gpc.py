@@ -1,20 +1,23 @@
 """Beta calibration (general posterior calibration) for NSM-Bayes."""
 
 import math
-import types
 from collections.abc import Callable
 
 import torch
 from scipy.stats import chi2
-from torch.func import hessian, jacrev, vmap
+from torch.func import vmap
 from tqdm import tqdm
 
 from nsm_bayes.inference.general.train import compute_theta_hat_true_general
-from nsm_bayes.models.conjugate.conj_posterior import (
-    compute_posterior_conjugate
+from nsm_bayes.models.conjugate.conj_posterior import compute_posterior_conjugate
+from nsm_bayes.utils.linalg import (
+    get_cov_term_single,
+    get_div_term_single,
+    get_non_div_term_single,
+    jacobian_and_hessian,
+    sigma_inverse,
 )
-from nsm_bayes.utils.statistics import robust_mean_cov
-from nsm_bayes.utils.linalg import sigma_inverse,jacobian_and_hessian,get_non_div_term_single, get_div_term_single, get_cov_term_single
+from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.weightfuns import imq_weight, weight_function
 
 # Small constant that only guards divisions and logs from 0/NaN.
@@ -441,6 +444,7 @@ def calibrate_beta_gpc(
     learning_rate_fn = lambda t: 10.0 / (t + 10),
     max_log_step: float = 0.25,
     beta_min: float = 0.01,
+    robust: bool = True,
 ) -> tuple[float, dict]:
     """
     Calibrates the 'beta' hyperparameter using the General Posterior
@@ -458,6 +462,9 @@ def calibrate_beta_gpc(
         The original (un-normalized) prior covariance.
     initial_beta : float, default 0.1
         Starting guess for beta.
+    robust : bool, default True
+        If True, use robust (median/MCD) statistics for the observed data;
+        otherwise use plain sample moments.
     target_coverage : float, default 0.95
         The desired frequentist coverage (e.g., 0.95).
     num_iterations : int, default 50
@@ -494,8 +501,7 @@ def calibrate_beta_gpc(
 
     # --- Step 0: Establish the "Ground Truth" Parameter for the Bootstrap ---
     x_obs_normalized = model.standardizer_x(x_obs)
-    mu_hat_obs, Sigma_hat_obs = robust_mean_cov(x_obs_normalized)
-    Sigma_inv_obs = sigma_inverse(Sigma_hat_obs)
+    mu_hat_obs, Sigma_inv_obs = estimate_stats(x_obs_normalized, robust)
 
     # NSM-only minimiser (in normalized theta space)
     theta_hat_norm_true = compute_theta_hat_true_conjugate(
@@ -536,8 +542,7 @@ def calibrate_beta_gpc(
 
             # b. Compute posterior for the bootstrap sample using the current beta
             x_boot_normalized = model.standardizer_x(x_boot)
-            mu_hat_boot, Sigma_hat_boot = robust_mean_cov(x_boot_normalized)
-            Sigma_inv_boot = sigma_inverse(Sigma_hat_boot)
+            mu_hat_boot, Sigma_inv_boot = estimate_stats(x_boot_normalized, robust)
 
             mu_boot_norm, Sigma_boot_norm = compute_posterior_conjugate(
                 x_boot_normalized, model, beta,

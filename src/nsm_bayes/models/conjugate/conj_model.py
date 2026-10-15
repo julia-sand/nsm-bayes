@@ -93,8 +93,11 @@ class ConjugateModel(nn.Module):
                     x_n, self, beta,
                     self.standardizer_theta(prior_mean), prior_cov / torch.outer(s, s),
                     imq_weight, mu_hat_obs, Sigma_inv, c)
+        
         mu_n = mu_n_normalized * s + m
+        
         Sigma_n = Sigma_n_normalized * torch.outer(s, s) 
+
         return mu_n, Sigma_n
         
     def sample_posterior(self):
