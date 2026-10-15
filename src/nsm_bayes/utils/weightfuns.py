@@ -63,7 +63,7 @@ def imq_weight(x, mu_hat, Sigma_inv, c=1, zeta=1):
     w2 = 1.0 / (denom ** (2 / zeta))
 
     coef = (-(4.0 / (zeta * c)) * denom ** (-(2 / zeta) - 1))
-    grad_w2 = coef.reshape(x.shape) * Sd
+    grad_w2 = coef.unsqueeze(-1) * Sd
 
     return _squeeze(x, w2, grad_w2)
 

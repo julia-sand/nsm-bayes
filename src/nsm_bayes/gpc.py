@@ -1,6 +1,7 @@
 """Beta calibration (general posterior calibration) for NSM-Bayes."""
 
 import math
+import types
 from collections.abc import Callable
 
 import torch
@@ -9,12 +10,11 @@ from torch.func import hessian, jacrev, vmap
 from tqdm import tqdm
 
 from nsm_bayes.inference.general.train import compute_theta_hat_true_general
-from nsm_bayes.method import (
-    compute_posterior_conjugate,
-    get_div_term_single,
-    robust_mean_cov,
-    sigma_inverse,
+from nsm_bayes.models.conjugate.conj_posterior import (
+    compute_posterior_conjugate
 )
+from nsm_bayes.utils.statistics import robust_mean_cov
+from nsm_bayes.utils.linalg import sigma_inverse,jacobian_and_hessian,get_non_div_term_single, get_div_term_single, get_cov_term_single
 from nsm_bayes.utils.weightfuns import imq_weight, weight_function
 
 # Small constant that only guards divisions and logs from 0/NaN.
@@ -45,9 +45,9 @@ def cache_perx_sm_losses(
     def per_x_loss_for_theta(xi, w2_i, grad_w2_i, theta):
         # log q(x | theta)
         log_q_fn = lambda x_vec: q_phi_log_prob(x_vec.unsqueeze(0), theta.unsqueeze(0)).sum()
-        score = jacrev(log_q_fn)(xi)      # (d_x,)
-        hess  = hessian(log_q_fn)(xi)     # (d_x,d_x) or scalar if d_x=1
-
+        
+        score, hess = jacobian_and_hessian(xi,log_q_fn)
+        
         term1 = w2_i * (score @ score)
         term2 = 2.0 * grad_w2_i @ score
         if hess.ndim == 0:
@@ -382,58 +382,37 @@ def compute_theta_hat_true_case1(
         theta space that T_phi produces.
     """
 
+    # IMQ weight w^2(x) and its analytic gradient (n,) and (n, d_x)
+    w2, grad_w2 = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c)
 
-    # ---------- 1. A = sum_i w(x_i)^2 * J_T(x_i)^T J_T(x_i) ----------
-    def get_cov_term_single(xi):
-        # T_phi: x -> R^{d_theta}
-        T_phi_wrapped = lambda x_vec: T_phi(x_vec.unsqueeze(0)).squeeze(0)
-        jac_T = jacrev(T_phi_wrapped)(xi)  # (d_theta, d_x)
-        return jac_T @ jac_T.T             # (d_theta, d_theta)
+    
+    # A = sum_i w2_i * J_T(x_i)^T J_T(x_i)   (d_theta, d_theta)
+    # The networks are not batched: vmap them with in_dim=None. get_cov_term_
+    # single(xi, fn) returns (J_T^T J_T, J_T); only the covariance term is kept.
+    batched_cov_terms, _ = vmap(get_cov_term_single, in_dims=(0, None))(
+        x_obs, T_phi
+    )  # (n, d_theta, d_theta)
+    A = (w2.view(-1, 1, 1) * batched_cov_terms).sum(dim=0)  # (d_theta, d_theta)
 
-    batched_cov_terms = vmap(get_cov_term_single)(x_obs)  # (n, d_theta, d_theta)
+    # B = sum_i [ w2_i * div_theta log p(x_i | theta)
+    #             + grad_x w2(x_i)^T score_x(x_i) ]   (d_theta,)
+    # get_non_div_term_single(xi, fn1, fn2, Jac1, Jac2) = Jac1 @ Jac2; both
+    # Jacobians are recomputed per point and w2 is applied outside, since this
+    # helper takes no weights.
+    batched_non_div_terms = vmap(
+        get_non_div_term_single, in_dims=(0, None, None, None, None)
+    )(x_obs, T_phi, b_phi, None, None)  # (n, d_theta)
+    term_non_div = (w2.view(-1, 1) * batched_non_div_terms).sum(dim=0)  # (d_theta,)
 
-    weights = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1, 1)  # (n,1,1)
-    A = (weights * batched_cov_terms).sum(dim=0)  # (d_theta, d_theta)
+    # term_div = sum_i div_x[ w(x_i)^2 * score_x(x_i) ]  (vector in R^{d_theta})
+    # get_div_term_single(xi, model, w2, grad_w2) reads model.T_phi itself and
+    # weights by w2 inside, so it is NOT re-applied when reducing below.
+    batched_divergences = vmap(get_div_term_single, in_dims=(0, None, 0, 0))(
+        x_obs, T_phi, w2, grad_w2
+    )  # (n, d_theta)
+    term_div = batched_divergences.sum(dim=0)  # (d_theta,)
 
-    # ---------- 2. B = term_non_div + term_div (vector in R^{d_theta}) ----------
-    # term_non_div = sum_i w(x_i)^2 * J_T(x_i)^T * grad_x b(x_i)
-    def get_non_div_term_single(xi):
-        T_phi_wrapped = lambda x_vec: T_phi(x_vec.unsqueeze(0)).squeeze(0)
-        b_phi_wrapped = lambda x_vec: b_phi(x_vec.unsqueeze(0)).squeeze()
-
-        jac_T = jacrev(T_phi_wrapped)(xi)  # (d_theta, d_x)
-        jac_b = jacrev(b_phi_wrapped)(xi)  # (d_x,)
-        return jac_T @ jac_b               # (d_theta,)
-
-    batched_non_div_terms = vmap(get_non_div_term_single)(x_obs)  # (n, d_theta)
-    weights_h = weight_fn(x_obs, mu_hat_obs, Sigma_inv_obs, c).view(-1, 1)  # (n,1)
-    term_non_div = (weights_h * batched_non_div_terms).sum(dim=0)  # (d_theta,)
-
-    # term_div = sum_i div_x[ w(x_i)^2 * J_T(x_i)^T ]  (vector in R^{d_theta})
-    #def get_div_term_single(xi):
-    #    def divergence_field_fn(x_vec):
-    #        T_phi_wrapped = lambda z: T_phi(z.unsqueeze(0)).squeeze(0)
-    #        w2_local = w_imq_squared_fn(x_vec.unsqueeze(0), mu_hat_obs, Sigma_inv_obs, c).squeeze()
-    #        jac_T_local = jacrev(T_phi_wrapped)(x_vec)  # (d_theta, d_x)
-    #        # field: (d_x, d_theta); column k is a vector field in R^{d_x}
-    #        return w2_local * jac_T_local.T
-
-    #    # jac_of_field: (d_x, d_theta, d_x)
-    #    jac_of_field = jacrev(divergence_field_fn)(xi)
-    #    # divergence of each column: trace over (0,2) dims, get (d_theta,)
-    #    divergence = jac_of_field.diagonal(offset=0, dim1=0, dim2=2).sum(dim=1)
-    #    return divergence  # (d_theta,)
-
-    batched_divergences = vmap(get_div_term_single)(x_obs)  # (n, d_theta)
-    term_div = batched_divergences.sum(dim=0)               # (d_theta,)
-
-    B = term_non_div + term_div  # (d_theta,)
-
-    eig = torch.linalg.eigvalsh(A).detach().cpu()
-    #print("A: ", A)
-    #print("A eig min/max:", eig.min().item(), eig.max().item())
-    #print("cond(A):", (eig.max()/eig.min().clamp_min(1e-30)).item())
-    #print("||B||:", torch.linalg.norm(B).item())
+    B = term_non_div - term_div  # (d_theta,)
 
     # ---------- 3. Solve A * theta_hat_true = -B ----------
     d_theta = A.shape[0]

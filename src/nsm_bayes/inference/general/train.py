@@ -1,5 +1,7 @@
 import torch
-from torch.func import hessian, jacrev, vmap
+from torch.func import vmap
+
+from nsm_bayes.utils.linalg import jacobian_and_laplacian
 
 
 def compute_theta_hat_true_general(
@@ -53,15 +55,12 @@ def compute_theta_hat_true_general(
                 theta.unsqueeze(0)
             ).sum()
 
-            score = jacrev(log_q_fn)(xi)      # (d_x,)
-            hess  = hessian(log_q_fn)(xi)     # (d_x,d_x) or scalar
+            # score wrt x and exact Hessian trace (Laplacian) in one pass
+            score, trH = jacobian_and_laplacian(xi, log_q_fn)  # (d_x,), scalar
 
             term1 = w2_i * (score @ score)
             term2 = 2.0 * grad_w2_i @ score
-            if hess.ndim == 0:
-                term3 = 2.0 * w2_i * hess
-            else:
-                term3 = 2.0 * w2_i * torch.trace(hess)
+            term3 = 2.0 * w2_i * trH
             return term1 + term2 + term3
 
         # vectorise over x

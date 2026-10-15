@@ -2,15 +2,14 @@
 import torch
 from torch import nn
 
-from nsm_bayes.method import (
-    compute_posterior_conjugate,
-    robust_mean_cov,
-    sample_mean_and_covariance,
-    sigma_inverse,
-)
 from nsm_bayes.models.conjugate.bphi_net import BphiNet
+from nsm_bayes.models.conjugate.conj_posterior import (
+    compute_posterior_conjugate,
+)
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
+from nsm_bayes.utils.statistics import robust_mean_cov,sample_mean_and_covariance
+from nsm_bayes.utils.linalg import sigma_inverse
 from nsm_bayes.utils.weightfuns import imq_weight
 
 

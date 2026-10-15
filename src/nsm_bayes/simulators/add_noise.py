@@ -2,7 +2,6 @@
 import torch
 
 # Small constant that only guards the scale estimate from collapsing to zero.
-EPS = 1e-8
 from torch.distributions import Binomial, StudentT
 
 
@@ -54,7 +53,7 @@ def add_student_t_noise(
     df: float = 3.0,
     noise_scale: float = 1.0,
     use_robust_scale: bool = False,
-    eps: float = EPS,
+    eps: float = 1e-8,
 ):
     """
     Add Student-t heavy-tailed noise to an epsilon fraction of samples.

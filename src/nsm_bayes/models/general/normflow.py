@@ -20,13 +20,10 @@ from sbi.inference import SNLE
 from torch.distributions import MultivariateNormal
 
 from nsm_bayes.gpc import calibrate_beta
-from nsm_bayes.method import (
-    ScoreMatchingLogPosterior,
-    robust_mean_cov,
-    sigma_inverse,
-)
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import sample_mean_and_covariance
+from nsm_bayes.method import ScoreMatchingLogPosterior
+from nsm_bayes.models.general.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.utils.statistics import estimate_stats
+from nsm_bayes.utils.linalg import sigma_inverse
 
 __all__ = [
     "train_normflow",
@@ -157,19 +154,6 @@ def run_mcmc(
     return posterior_samples
 
 
-def _estimate_robust_stats(x_obs: torch.Tensor, robust: bool):
-    """Return ``(mu_hat, Sigma_inv)`` for the general-method posterior.
-
-    Robust (median / MCD) estimates when `robust` is true, plain sample
-    moments otherwise, with the covariance inverted by
-    :func:`nsm_bayes.method.sigma_inverse`.
-    """
-    if robust:
-        mu_hat, Sigma_hat = robust_mean_cov(x_obs)
-    else:
-        mu_hat, Sigma_hat = sample_mean_and_covariance(x_obs)
-    return mu_hat, sigma_inverse(Sigma_hat)
-
 
 def _sample_general_posterior(
     x_obs: torch.Tensor,
@@ -202,6 +186,12 @@ def _sample_general_posterior(
         thin=thin,
     )
     return torch.from_numpy(samples).to(x_obs.dtype).to(x_obs.device)
+
+def refresh_sampler_at(beta_new: float) -> torch.Tensor:
+    return _sample_general_posterior(
+        x_obs, prior, flow, beta_new, mu_hat, Sigma_inv,
+        num_samples, num_chains, warmup_steps, thin,
+    )
 
 
 def calibrate_beta_normflow(
@@ -268,18 +258,12 @@ def calibrate_beta_normflow(
     tuple[float, dict]
         The calibrated ``beta`` and the history of betas and coverages.
     """
-    mu_hat, Sigma_inv = _estimate_robust_stats(x_obs, robust)
+    mu_hat, Sigma_inv = estimate_stats(x_obs, robust)
 
     theta_samples_base = _sample_general_posterior(
         x_obs, prior, flow, beta_base, mu_hat, Sigma_inv,
         num_samples, num_chains, warmup_steps, thin,
     )
-
-    def refresh_sampler_at(beta_new: float) -> torch.Tensor:
-        return _sample_general_posterior(
-            x_obs, prior, flow, beta_new, mu_hat, Sigma_inv,
-            num_samples, num_chains, warmup_steps, thin,
-        )
 
     return calibrate_beta(
         theta_samples_base=theta_samples_base,

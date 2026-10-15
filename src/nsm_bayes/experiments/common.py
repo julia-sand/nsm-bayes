@@ -12,27 +12,24 @@ from __future__ import annotations
 import logging
 import pickle
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Generator
 
 import torch
 from omegaconf import DictConfig
 
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.method import (
-    ScoreMatchingLogPosterior,
-    robust_mean_cov,
-    sigma_inverse,
-)
+from nsm_bayes.gpc import calibrate_beta_gpc
 from nsm_bayes.models.conjugate import ConjugateModel
-from nsm_bayes.models.general import make_nle_logprob, train_normflow
+from nsm_bayes.models.general import train_normflow
 from nsm_bayes.models.general.normflow import (
+    _sample_general_posterior,
     calibrate_beta_normflow,
     run_mcmc,
 )
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import sample_mean_and_covariance, set_seed
+from nsm_bayes.utils import set_seed
+from nsm_bayes.utils.statistics import estimate_stats
 
 __all__ = [
     "ExperimentData",
@@ -83,7 +80,8 @@ def save(save_dir: Path, name: str, rep: int, obj: Any) -> None:
         pickle.dump(obj, fh)
 
 
-def timed(save_dir: Path, name: str, rep: int) -> Iterator[None]:
+@contextmanager
+def timed(save_dir: Path, name: str, rep: int) -> Generator[None]:
     """Time a block and save the elapsed seconds as ``cost_{name}_{rep}.pkl``."""
     start = time.perf_counter()
     try:
@@ -91,49 +89,6 @@ def timed(save_dir: Path, name: str, rep: int) -> Iterator[None]:
     finally:
         save(save_dir, f"cost_{name}", rep, time.perf_counter() - start)
 
-
-def _estimate_robust_stats(x_obs: torch.Tensor, robust: bool):
-    """Return ``(mu_hat, Sigma_inv)`` for the observed data.
-
-    Mirrors the statistics used by the general-method posterior: robust
-    (median / MCD) estimates when `robust` is true, plain sample moments
-    otherwise, with the covariance inverted by :func:`sigma_inverse`.
-    """
-    if robust:
-        mu_hat, Sigma_hat = robust_mean_cov(x_obs)
-    else:
-        mu_hat, Sigma_hat = sample_mean_and_covariance(x_obs)
-    return mu_hat, sigma_inverse(Sigma_hat)
-
-
-def _sample_general_posterior(
-    x_obs: torch.Tensor,
-    prior,
-    flow,
-    beta: float,
-    mu_hat: torch.Tensor,
-    Sigma_inv: torch.Tensor,
-    cfg: DictConfig,
-) -> torch.Tensor:
-    """Draw posterior samples for the general method with the slice sampler."""
-    log_posterior = ScoreMatchingLogPosterior(
-                    x_obs=x_obs,
-                    prior=prior,
-                    beta=beta,
-                    q_phi_log_prob=flow,
-                    mu_hat=mu_hat,
-                    Sigma_inv=Sigma_inv,
-                    weight_type="imq",
-                )
-    samples = run_multivariate_slice_sampler_tuned(
-        log_posterior_fn=log_posterior,
-        prior=prior,
-        num_samples=cfg.num_posterior_samples,
-        num_chains=cfg.num_chains,
-        warmup_steps=cfg.warmup_steps,
-        thin=cfg.thin,
-    )
-    return torch.from_numpy(samples).to(x_obs.dtype).to(x_obs.device)
 
 def run_normflow_methods(
     data: ExperimentData,
@@ -153,6 +108,7 @@ def run_normflow_methods(
     """
     x_obs_mis = data.x_obs_mis
 
+    #train the surrogate model
     with timed(save_dir, "nle_training", rep):
         flow = train_normflow(
             data.theta,
@@ -162,6 +118,7 @@ def run_normflow_methods(
         )
     torch.save(flow, save_dir / f"likelihood_estimator_full_{rep}.pt")
 
+    #sample the posterior
     with timed(save_dir, "nle_mcmc", rep):
         samples_nle_mis = run_mcmc(
             x_obs_mis,
@@ -174,9 +131,11 @@ def run_normflow_methods(
         )
     save(save_dir, "samples_nle_mis", rep, samples_nle_mis)
 
+    #estimate the robust statistics
     robust = cfg.get("robust_flag", True)
-    mu_hat, Sigma_inv = _estimate_robust_stats(x_obs_mis, robust)
+    mu_hat, Sigma_inv = estimate_stats(x_obs_mis, robust)
 
+    #calibrate beta / temperature
     with timed(save_dir, "sm_general_mcmc", rep):
         beta, history = calibrate_beta_normflow(
             flow,
@@ -222,17 +181,20 @@ def run_conjugate_method(
     prior_cov = prior.covariance_matrix
     d_theta = prior_mean.shape[0]
 
+    #define the energy model
     model = ConjugateModel(
         d_x=cfg.d_x, d_theta=d_theta, hidden_dim=cfg.hidden_dim
     )
     dev = x_obs_mis.device
     model = model.to(device=dev, dtype=x_obs_mis.dtype)
 
+    #train the model
     with timed(save_dir, "sm_case1_train", rep):
         model.fit(x_sim=data.x_sim, theta_sim=data.theta)
     model.save_checkpoint(cfg, save_dir, rep)
 
     with timed(save_dir, "sm_case1_posterior", rep):
+        #calibrate the temperature
         beta, history = calibrate_beta_gpc(
             x_obs_mis,
             model,
@@ -244,6 +206,7 @@ def run_conjugate_method(
             num_bootstraps=cfg.B,
             beta_min=cfg.get("beta_min_case1", 0.01),
         )
+        #compute robust posterior
         mu_n, Sigma_n = model.calibrated_posterior(
             x_obs_mis,
             beta,
@@ -267,7 +230,7 @@ def run_experiment(
 
     For each repetition the RNGs are seeded, all data (training and
     observed) is generated and saved first, and only then is `method_step`
-    called, so both variants of an experiment consume identical data.
+    called, so both variants of an experiment get the same data.
 
     Parameters
     ----------

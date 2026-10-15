@@ -4,9 +4,10 @@ from typing import Dict
 import torch
 import torch.optim as optim
 from torch import nn
+from torch.func import vmap
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from nsm_bayes.method import calculate_training_loss
+from nsm_bayes.utils.linalg import jacobian_and_hessian
 
 
 # Function to train the surrogate model for the conjugate case
@@ -123,3 +124,57 @@ def train_q_phi(  #add training params to be passed explicitly?
         print("Warning: Training finished but no best model was saved. The final model is the last one trained.")
 
     return history
+
+
+def calculate_training_loss(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
+    """
+    Weighted score-matching loss (per-batch mean) for the exponential-family case:
+       score(x;θ) = J_T(x)^T θ + ∇ b(x)
+       L(x,θ)     = (score^T Σ^{-1} score) + 2 tr( Σ^{-1} ( Σ_i θ_i ∇^2 T_i(x) + ∇^2 b(x) ) )
+
+    Shapes:
+      x_batch:      (B, d_x)
+      theta_batch:  (B, d_theta)
+      T_phi(x):     (d_theta,)         -> J_T(x): (d_theta, d_x)
+      b_phi(x):     scalar             -> ∇ b(x): (d_x,),  ∇^2 b(x): (d_x, d_x)
+      Σ^{-1}:       (d_x, d_x)
+    """
+    B, d_x = x_batch.shape
+    assert theta_batch.shape[0] == B, "Batch sizes of x and theta must match."
+    d_theta = theta_batch.shape[1]
+
+    # Ensure Σ^{-1} matches dtype/device
+    Sigma_inv = Sigma_inv.to(device=x_batch.device, dtype=x_batch.dtype)
+    assert Sigma_inv.shape == (d_x, d_x), "Sigma_inv must be (d_x, d_x)."
+
+    # Temporarily set eval() to freeze any dropout/bn, but keep grads
+    was_training_T, was_training_b = T_phi.training, b_phi.training
+    T_phi.eval(); b_phi.eval()
+
+    def loss_for_single_pair(xi, thetai):
+
+        J_T,H_T = jacobian_and_hessian(xi,T_phi)
+        grad_b, H_b = jacobian_and_hessian(xi,b_phi)
+
+        # score(x;θ): (d_x,)
+        score = J_T.T @ thetai + grad_b
+
+        # ∇^2 log q(x|θ) = Σ_i θ_i ∇^2 T_i(x) + ∇^2 b(x)  -> (d_x, d_x)
+        H_logq = torch.einsum('i,ijk->jk', thetai, H_T) + H_b
+
+        # score^T Σ^{-1} score
+        score_term = torch.dot(score, Sigma_inv @ score)
+
+        # 2 * tr( Σ^{-1} H_logq ) = 2 * sum(Σ^{-1} * H_logq)
+        div_term = 2.0 * torch.sum(Sigma_inv * H_logq)
+
+        return (score_term + div_term) #/ d_x
+
+    # Vectorize across batch
+    losses = vmap(loss_for_single_pair, in_dims=(0, 0))(x_batch, theta_batch)
+
+    # Restore training flags
+    if was_training_T: T_phi.train()
+    if was_training_b: b_phi.train()
+
+    return losses.mean()

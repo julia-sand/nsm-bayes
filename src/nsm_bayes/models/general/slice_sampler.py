@@ -1,3 +1,4 @@
+"""Multivariate slice sampler with adaptive width tuning for NSM-Bayes."""
 import numpy as np
 from joblib import Parallel, delayed
 
