@@ -1,8 +1,9 @@
-"""Regression tests for ``scripts/conjugate/run_sir_undercounting.py``.
+"""Regression tests for the SIR undercounting experiment (conjugate variant).
 
-The full pipeline is exercised end to end through ``run_sir_undercounting._run``
-with a tiny config.  The :class:`SIRSimulator` simulator is also tested
-directly: it must stay self-contained and deterministic under a fixed seed.
+The full pipeline is exercised end to end through
+``scripts.conjugate.run_sir_undercounting._run`` with a tiny config (see
+:mod:`tests.conftest` for the fast stand-ins).  The data files must be
+bit-identical to the normflow variant's for the same seed.
 """
 from __future__ import annotations
 
@@ -10,94 +11,76 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from nsm_bayes.simulators.benchmark_simulators.simulators import SIRSimulator
+from nsm_bayes.experiments import common, sir_undercounting
+from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 from scripts.conjugate import run_sir_undercounting
+from scripts.normflow import run_sir_undercounting as run_sir_uc_normflow
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
 def _theta_true() -> torch.Tensor:
-    """Return the log-space ``theta_true`` from ``configs/sir_undercounting.yaml``."""
+    """Return the true ``theta_true`` from ``configs/sir_undercounting.yaml``."""
     cfg = OmegaConf.load("configs/sir_undercounting.yaml")
-    return torch.log(torch.tensor(cfg.theta_true, dtype=torch.float32))
+    return torch.tensor(cfg.theta_true, dtype=torch.float32)
 
 
 @pytest.fixture
-def sir_un_run(sir_un_cfg, tmp_path):
-    """Run one tiny SIR-un experiment into ``tmp_path`` and return the save dir."""
+def sir_un_run(sir_uc_cfg, tmp_path):
+    """Run one tiny SIR-un experiment into ``tmp_path``."""
     save_dir = tmp_path / "sir_undercounting_conjugate"
-    run_sir_undercounting._run(cfg=sir_un_cfg, save_dir=save_dir)
+    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_conjugate_method, save_dir)
     return save_dir
 
 
 def test_sir_un_model_deterministic():
-    """The same seed gives bit-identical moment summaries."""
-    t = _theta_true()
-    sim = SIRSimulator(obs_model="poisson", device="cpu")
+    """The same seed gives bit-identical trajectories."""
+    sim = SIRSimulator(obs_model="poisson")
     torch.manual_seed(0)
-    a = sim.simulate(t, output="moments", epsilon=0.1)
+    a = sim.simulate(_theta_true().repeat(4, 1), T=40, N=1000)
     torch.manual_seed(0)
-    b = sim.simulate(t, output="moments", epsilon=0.1)
-    assert a.shape == (1, 3), f"SIR-un moments shape {tuple(a.shape)}"
+    b = sim.simulate(_theta_true().repeat(4, 1), T=40, N=1000)
+    assert a.shape == (4, 40), f"SIR trajectories shape {tuple(a.shape)}"
     assert torch.isfinite(a).all()
     assert torch.equal(a, b), "SIRSimulator is not deterministic under a fixed seed"
 
 
-def test_sir_un_model_epsilon_changes_output():
-    """Replacing half the receivers with noise must change the summaries."""
-    t = _theta_true()
-    n = 60
+def test_sir_un_model_changes_with_seed():
+    """Different seeds give different trajectories."""
+    sim = SIRSimulator(obs_model="poisson")
     torch.manual_seed(1)
-    sim = SIRSimulator(obs_model="poisson", device="cpu")
-    clean = sim.simulate(t.repeat(n, 1), output="moments", epsilon=0.0)
-    torch.manual_seed(1)
-    noisy = sim.simulate(t.repeat(n, 1), output="moments", epsilon=0.5)
-    assert clean.shape == noisy.shape == (n, 3)
-    assert not torch.equal(clean, noisy), "epsilon=0.5 had no effect on the output"
+    clean = sim.simulate(_theta_true().repeat(4, 1), T=40, N=1000)
+    torch.manual_seed(2)
+    noisy = sim.simulate(_theta_true().repeat(4, 1), T=40, N=1000)
+    assert clean.shape == noisy.shape == (4, 40)
+    assert not torch.equal(clean, noisy), "Different seeds had no effect on the output"
 
 
-def test_sir_un_case1_posterior(sir_un_run, sir_un_cfg):
+def test_sir_un_case1_posterior(sir_un_run, sir_uc_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
-        sir_un_run, d_theta=4, beta_min=float(sir_un_cfg.get("beta_min_case1", 0.0))
+        sir_un_run, d_theta=4, beta_min=float(sir_uc_cfg.get("beta_min_case1", 0.0))
     )
 
 
-def test_sir_un_simulated_data_shapes(sir_un_run, sir_un_cfg):
-    """Simulated training and observed data have the expected shapes.
-
-    Each training row is one receiver simulated under its own theta
-    (``num_samples`` receivers total).  The observed dataset is one
-    simulation of ``n_obs`` receivers under ``theta_true`` with
-    ``epsilon`` outliers.
-    """
+def test_sir_un_simulated_data_shapes(sir_un_run, sir_uc_cfg):
+    """Simulated training and observed data have the expected shapes."""
     theta = load_tensor(sir_un_run, "theta_0.pkl")
     x_sim = load_tensor(sir_un_run, "x_sim_0.pkl")
     x_obs_mis = load_tensor(sir_un_run, "x_obs_mis_0.pkl")
 
-    assert theta.shape == (sir_un_cfg.num_samples, 4)
-    assert x_sim.shape == (sir_un_cfg.num_samples, sir_un_cfg.d_x)
-    assert x_obs_mis.shape == (sir_un_cfg.n_obs, sir_un_cfg.d_x)
+    assert theta.shape == (sir_uc_cfg.num_samples, 4)
+    assert x_sim.shape == (sir_uc_cfg.num_samples, sir_uc_cfg.d_x)
+    assert x_obs_mis.shape == (sir_uc_cfg.n_obs, sir_uc_cfg.d_x)
     for arr, name in ((theta, "theta"), (x_sim, "x_sim"), (x_obs_mis, "x_obs_mis")):
         assert torch.isfinite(arr).all(), f"{name} has non-finite entries"
 
 
-def test_sir_un_prior():
-    """The built-in prior matches the hyperparameters in ``configs/sir_undercounting.yaml``."""
-    cfg = OmegaConf.load("configs/sir_undercounting.yaml")
-    sim = SIRSimulator(obs_model="poisson")
-    prior = sim.prior()
-    assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
-    assert torch.allclose(
-        prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
-    )
-    assert prior.sample((5,)).shape == (5, 4)
-    assert torch.isfinite(prior.sample((10,))).all()
-
-
-def test_sir_un_generate_training_data_shapes():
-    """Training data from the prior has the expected shapes."""
-    sim = SIRSimulator(obs_model="poisson", device="cpu")
-    theta, x_sim = sim.generate_training_data(sim.prior(), 6)
-    assert theta.shape == (6, 4)
-    assert x_sim.shape == (6, 3)
-    assert torch.isfinite(x_sim).all()
+def test_sir_un_data_identical_across_methods(sir_uc_cfg, tmp_path):
+    """Both method variants produce identical data for the same seed."""
+    nf_dir = tmp_path / "sir_uc_nf"
+    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_normflow_methods, nf_dir)
+    cj_dir = tmp_path / "sir_uc_cj"
+    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_conjugate_method, cj_dir)
+    for name in ("theta", "x_sim", "x_obs_mis", "y_obs", "is_contam"):
+        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
+                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"

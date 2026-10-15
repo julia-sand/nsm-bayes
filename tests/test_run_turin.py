@@ -1,9 +1,8 @@
-"""Regression tests for ``scripts/run_turin.py``.
+"""Regression tests for the Turin channel-model experiment (normflow variant).
 
-The full pipeline is exercised end to end through ``run_turin._run`` with a
-tiny config (see :mod:`tests.conftest` for the fast NLE/
-score-matching stand-ins).  The :class:`TurinSimulator` simulator is also tested
-directly: it must stay self-contained and deterministic under a fixed seed.
+The full pipeline is exercised end to end with a tiny config (see
+:mod:`tests.conftest` for the fast stand-ins).  The data files must be
+bit-identical to the conjugate variant's for the same seed.
 """
 from __future__ import annotations
 
@@ -11,7 +10,9 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
+from nsm_bayes.experiments import common, turin
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
+from scripts.conjugate import run_turin as run_turin_conjugate
 from scripts.normflow import run_turin
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
@@ -26,34 +27,34 @@ def _theta_true() -> torch.Tensor:
 def turin_run(turin_cfg, tmp_path):
     """Run one tiny Turin experiment into ``tmp_path`` and return the save dir."""
     save_dir = tmp_path / "turin"
-    run_turin._run(cfg=turin_cfg, save_dir=save_dir)
+    common.run_experiment(turin_cfg, turin, common.run_normflow_methods, save_dir)
     return save_dir
 
 
 def test_turin_model_deterministic():
-    """The same seed gives bit-identical moment summaries."""
+    """The same seed gives bit-identical results."""
     t = _theta_true()
     sim = TurinSimulator(N=30, Ns=801, device="cpu")
     torch.manual_seed(0)
-    a = sim.simulate(t, output="moments", epsilon=0.1)
+    a = sim.simulate(t, N=30)
     torch.manual_seed(0)
-    b = sim.simulate(t, output="moments", epsilon=0.1)
+    b = sim.simulate(t, N=30)
     assert a.shape == (30, 3), f"TurinSimulator moments shape {tuple(a.shape)}"
     assert torch.isfinite(a).all()
     assert torch.equal(a, b), "TurinSimulator is not deterministic under a fixed seed"
 
 
-def test_turin_model_epsilon_changes_output():
-    """Replacing half the receivers with noise must change the summaries."""
+def test_turin_model_changes_with_seed():
+    """Different seeds give different data."""
     t = _theta_true()
     n = 60
     torch.manual_seed(1)
     sim = TurinSimulator(N=n, Ns=801, device="cpu")
-    clean = sim.simulate(t, output="moments", epsilon=0.0)
-    torch.manual_seed(1)
-    noisy = sim.simulate(t, output="moments", epsilon=0.5)
+    clean = sim.simulate(t, N=n)
+    torch.manual_seed(2)
+    noisy = sim.simulate(t, N=n)
     assert clean.shape == noisy.shape == (n, 3)
-    assert not torch.equal(clean, noisy), "epsilon=0.5 had no effect on the output"
+    assert not torch.equal(clean, noisy), "Different seeds had no effect on the output"
 
 
 def test_turin_case1_posterior(turin_run, turin_cfg):
@@ -64,13 +65,7 @@ def test_turin_case1_posterior(turin_run, turin_cfg):
 
 
 def test_turin_simulated_data_shapes(turin_run, turin_cfg):
-    """Simulated training and observed data have the expected shapes.
-
-    Each training row is one receiver simulated under its own theta
-    (``num_samples`` receivers total).  The observed dataset is one
-    simulation of ``n_obs`` receivers under ``theta_true`` with
-    ``epsilon`` outliers.
-    """
+    """Simulated training and observed data have the expected shapes."""
     theta = load_tensor(turin_run, "theta_0.pkl")
     x_sim = load_tensor(turin_run, "x_sim_0.pkl")
     x_obs_mis = load_tensor(turin_run, "x_obs_mis_0.pkl")
@@ -80,6 +75,17 @@ def test_turin_simulated_data_shapes(turin_run, turin_cfg):
     assert x_obs_mis.shape == (turin_cfg.n_obs, turin_cfg.d_x)
     for arr, name in ((theta, "theta"), (x_sim, "x_sim"), (x_obs_mis, "x_obs_mis")):
         assert torch.isfinite(arr).all(), f"{name} has non-finite entries"
+
+
+def test_turin_data_identical_across_methods(turin_cfg, tmp_path):
+    """Both method variants produce identical data for the same seed."""
+    nf_dir = tmp_path / "turin_nf"
+    cj_dir = tmp_path / "turin_cj"
+    common.run_experiment(turin_cfg, turin, common.run_normflow_methods, nf_dir)
+    common.run_experiment(turin_cfg, turin, common.run_conjugate_method, cj_dir)
+    for name in ("theta", "x_sim", "x_obs_mis"):
+        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
+                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
 
 
 def test_turin_prior():

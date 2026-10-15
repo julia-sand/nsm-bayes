@@ -1,4 +1,5 @@
 import torch
+from torch.func import hessian, jacrev, vmap
 
 
 def compute_theta_hat_true_general(

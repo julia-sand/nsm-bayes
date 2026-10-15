@@ -1,9 +1,9 @@
-"""Regression tests for ``scripts/conjugate/run_gnk.py``.
+"""Regression tests for the g-and-k experiment (conjugate variant).
 
-The full pipeline is exercised end to end through ``run_gnk._run`` with a
-tiny config (see :mod:`tests.conftest` for the fast NLE/
-score-matching stand-ins).  The :class:`GNKSimulator` simulator is also tested
-directly: it must stay self-contained and deterministic under a fixed seed.
+The full pipeline is exercised end to end through
+``scripts.conjugate.run_gnk._run`` with a tiny config (see
+:mod:`tests.conftest` for the fast NLE/score-matching stand-ins).
+The data files must also be bit-identical to the normflow variant's.
 """
 from __future__ import annotations
 
@@ -11,49 +11,50 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
+from nsm_bayes.experiments import common, gnk
 from nsm_bayes.simulators.benchmark_simulators.simulators import GNKSimulator
 from scripts.conjugate import run_gnk
+from scripts.normflow import run_gnk as run_gnk_normflow
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
 def _theta_true() -> torch.Tensor:
-    """Return the log-space ``theta_true`` from ``configs/gnk.yaml``."""
+    """Return the ``theta_true`` from ``configs/gnk.yaml``."""
     cfg = OmegaConf.load("configs/gnk.yaml")
-    return torch.log(torch.tensor(cfg.theta_true, dtype=torch.float32))
+    return torch.tensor(cfg.theta_true, dtype=torch.float32)
 
 
 @pytest.fixture
 def gnk_run(gnk_cfg, tmp_path):
     """Run one tiny GNK experiment into ``tmp_path`` and return the save dir."""
     save_dir = tmp_path / "gnk_conjugate"
-    run_gnk._run(cfg=gnk_cfg, save_dir=save_dir)
+    common.run_experiment(gnk_cfg, gnk, common.run_conjugate_method, save_dir)
     return save_dir
 
 
 def test_gnk_model_deterministic():
-    """The same seed gives bit-identical moment summaries."""
+    """The same seed gives bit-identical data."""
     t = _theta_true()
-    sim = GNKSimulator(N=100, Ns=801, device="cpu")
+    sim = GNKSimulator()
     torch.manual_seed(0)
-    a = sim.simulate(t, output="moments", epsilon=0.1)
+    a = sim.simulate(t, n=4)
     torch.manual_seed(0)
-    b = sim.simulate(t, output="moments", epsilon=0.1)
-    assert a.shape == (100, 3), f"GNKSimulator moments shape {tuple(a.shape)}"
+    b = sim.simulate(t, n=4)
+    assert a.shape == (4,)
     assert torch.isfinite(a).all()
     assert torch.equal(a, b), "GNKSimulator is not deterministic under a fixed seed"
 
 
-def test_gnk_model_epsilon_changes_output():
-    """Replacing half the receivers with noise must change the summaries."""
+def test_gnk_model_data_changes_with_seed():
+    """Different seeds give different data."""
     t = _theta_true()
-    n = 60
+    sim = GNKSimulator()
     torch.manual_seed(1)
-    sim = GNKSimulator(N=n, Ns=801, device="cpu")
-    clean = sim.simulate(t, output="moments", epsilon=0.0)
-    torch.manual_seed(1)
-    noisy = sim.simulate(t, output="moments", epsilon=0.5)
-    assert clean.shape == noisy.shape == (n, 3)
-    assert not torch.equal(clean, noisy), "epsilon=0.5 had no effect on the output"
+    clean = sim.simulate(t, n=4)
+    torch.manual_seed(2)
+    noisy = sim.simulate(t, n=4)
+    assert clean.shape == noisy.shape == (4,)
+    assert not torch.equal(clean, noisy), "Different seeds had no effect on the output"
 
 
 def test_gnk_case1_posterior(gnk_run, gnk_cfg):
@@ -64,13 +65,7 @@ def test_gnk_case1_posterior(gnk_run, gnk_cfg):
 
 
 def test_gnk_simulated_data_shapes(gnk_run, gnk_cfg):
-    """Simulated training and observed data have the expected shapes.
-
-    Each training row is one receiver simulated under its own theta
-    (``num_samples`` receivers total).  The observed dataset is one
-    simulation of ``n_obs`` receivers under ``theta_true`` with
-    ``epsilon`` outliers.
-    """
+    """Simulated training and observed data have the expected shapes."""
     theta = load_tensor(gnk_run, "theta_0.pkl")
     x_sim = load_tensor(gnk_run, "x_sim_0.pkl")
     x_obs_mis = load_tensor(gnk_run, "x_obs_mis_0.pkl")
@@ -80,6 +75,30 @@ def test_gnk_simulated_data_shapes(gnk_run, gnk_cfg):
     assert x_obs_mis.shape == (gnk_cfg.n_obs, gnk_cfg.d_x)
     for arr, name in ((theta, "theta"), (x_sim, "x_sim"), (x_obs_mis, "x_obs_mis")):
         assert torch.isfinite(arr).all(), f"{name} has non-finite entries"
+
+
+def test_gnk_nets_saved(gnk_run):
+    """The Case-1 nets and standardizers are saved with the expected keys."""
+    nets = torch.load(gnk_run / "conjugate_nets_0.pt", map_location="cpu", weights_only=False)
+    for key in (
+        "T_phi_state_dict",
+        "B_phi_state_dict",
+        "standardizer_x_state_dict",
+        "standardizer_theta_state_dict",
+        "config",
+    ):
+        assert key in nets, f"conjugate_nets missing {key!r}"
+
+
+def test_gnk_data_identical_across_methods(gnk_cfg, tmp_path):
+    """Both method variants produce identical data for the same seed."""
+    nf_dir = tmp_path / "gnk_nf"
+    common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, nf_dir)
+    cj_dir = tmp_path / "gnk_cj"
+    common.run_experiment(gnk_cfg, gnk, common.run_conjugate_method, cj_dir)
+    for name in ("theta", "x_sim", "x_obs", "x_obs_mis", "outlier_indices"):
+        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
+                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
 
 
 def test_gnk_prior():
@@ -93,12 +112,3 @@ def test_gnk_prior():
     )
     assert prior.sample((5,)).shape == (5, 4)
     assert torch.isfinite(prior.sample((10,))).all()
-
-
-def test_gnk_generate_training_data_shapes():
-    """Training data from the prior has the expected shapes."""
-    sim = GNKSimulator(N=100, Ns=33, device="cpu")
-    theta, x_sim = sim.generate_training_data(sim.prior(), 6)
-    assert theta.shape == (6, 4)
-    assert x_sim.shape == (6, 3)
-    assert torch.isfinite(x_sim).all()

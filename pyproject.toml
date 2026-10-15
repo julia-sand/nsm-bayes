@@ -20,12 +20,6 @@ dependencies = [
     "tqdm>=4.66.0,<5",
 ]
 
-[project.scripts]
-nsm-bayes-gnk = "nsm_bayes.run_gnk:run_gnk"
-nsm-bayes-sir = "nsm_bayes.run_sir:run_sir"
-nsm-bayes-sir-undercounting = "nsm_bayes.run_sir_undercounting:run_sir_undercounting"
-nsm-bayes-turin = "nsm_bayes.run_turin:run_turin"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 

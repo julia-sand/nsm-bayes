@@ -1,12 +1,13 @@
 """Shared fixtures for the ``scripts/run_*`` regression tests.
 
-Each ``run_*`` script exposes a private :func:`_run(cfg, save_dir)` that is
-fully deterministic under its own ``torch.manual_seed`` calls. The tests call
-that seam directly with a tiny config and a temporary ``save_dir``, so they do
-not need hydra and do not write into the repository's ``data/`` directory.
+The experiment drivers in :mod:`nsm_bayes.experiments` are fully
+deterministic under their ``set_seed`` calls, so the tests call
+``run_experiment`` directly with a tiny config and a temporary
+``save_dir``: no hydra and nothing is written into the repository's
+``data/`` directory.
 
-Two heavy components are shrunk so a "fast" full run stays in the tens-of-
-seconds range:
+Two heavy components are shrunk so a "fast" full run stays in the
+tens-of-seconds range:
 
 * the normalising-flow likelihood trainer (``nsm_bayes.models.general.
   normflow.SNLE``) is replaced by a lightweight :class:`_StubNLE`, and

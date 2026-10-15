@@ -17,6 +17,7 @@ import pickle
 from pathlib import Path
 
 import numpy as np
+
 try:
     import torch
 except ImportError:  # only needed if the pickles hold torch tensors

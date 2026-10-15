@@ -1,15 +1,17 @@
-"""Regression tests for ``scripts/run_gnk.py``.
+"""Regression tests for the g-and-k experiment (normflow variant).
 
 The pipeline is well-specified (clean g-and-k data plus a few additive
 outliers), so the strongest check is that the Case-1 posterior mean lands
-close to the true parameter. Artifacts are written into ``tmp_path`` via the
-``_run`` seam; nothing touches the repository's ``data/`` directory.
+close to the true parameter.  The data files must also be bit-identical to
+the ones the conjugate variant writes for the same seed.
 """
 from __future__ import annotations
 
 import pytest
 import torch
 
+from nsm_bayes.experiments import common, gnk
+from scripts.conjugate import run_gnk as run_gnk_conjugate
 from scripts.normflow import run_gnk
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
@@ -18,7 +20,7 @@ from tests.conftest import assert_posterior_artifacts, load_tensor
 def gnk_run(gnk_cfg, tmp_path):
     """Run one tiny GNK experiment into ``tmp_path`` and return the save dir."""
     save_dir = tmp_path / "gnk"
-    run_gnk._run(cfg=gnk_cfg, save_dir=save_dir)
+    common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, save_dir)
     return save_dir
 
 
@@ -47,17 +49,10 @@ def test_gnk_observed_data(gnk_run, gnk_cfg):
         assert any(abs(delta - v) < 1e-4 for v in gnk_cfg.outlier_values)
 
 
-def test_gnk_nets_saved(gnk_run):
-    """The Case-1 nets and standardizers are saved with the expected keys."""
-    nets = torch.load(gnk_run / "conjugate_nets_0.pt", map_location="cpu", weights_only=False)
-    for key in (
-        "T_phi_state_dict",
-        "B_phi_state_dict",
-        "standardizer_x_state_dict",
-        "standardizer_theta_state_dict",
-        "config",
-    ):
-        assert key in nets, f"conjugate_nets missing {key!r}"
+def test_gnk_nle_saved(gnk_run):
+    """The trained likelihood estimator is saved as a torch file."""
+    flow = torch.load(gnk_run / "likelihood_estimator_full_0.pt", map_location="cpu", weights_only=False)
+    assert hasattr(flow, "log_prob")
 
 
 def test_gnk_case1_posterior(gnk_run, gnk_cfg):
@@ -74,6 +69,17 @@ def test_gnk_posterior_near_truth(gnk_run, gnk_cfg):
     theta_true = torch.tensor(gnk_cfg.theta_true, dtype=torch.float32)
     z = (mu - theta_true).abs() / torch.sqrt(torch.diagonal(cov)).clamp_min(1e-2)
     assert (z < 3.0).all(), f"posterior mean too far from truth (max z {z.max()})"
+
+
+def test_gnk_data_identical_across_methods(gnk_cfg, tmp_path):
+    """Both method variants produce identical data for the same seed."""
+    nf_dir = tmp_path / "gnk_nf"
+    cj_dir = tmp_path / "gnk_cj"
+    common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, nf_dir)
+    common.run_experiment(gnk_cfg, gnk, common.run_conjugate_method, cj_dir)
+    for name in ("theta", "x_sim", "x_obs", "x_obs_mis", "outlier_indices"):
+        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
+                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
 
 
 def test_gnk_prior_matches_config():

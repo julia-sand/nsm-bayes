@@ -44,17 +44,17 @@ def jacobian_with_spare(xi, fn):
     J = jacrev(_single(fn))(xi)                              # (d_out, d_x)
     return J, J
 
-def jacobian(fn, xi):
+def jacobian(xi, fn):
     """(d_out, d_x)"""
     return jacrev(_single(fn))(xi)
 
 
-def jacobian_and_hessian(fn, xi):
+def jacobian_and_hessian(xi, fn):
     """Jacobian (d_out, d_x) and Hessian (d_out, d_x, d_x) from one forward-over-reverse pass."""
     H, J = jacfwd(jacobian_with_spare, has_aux=True)(xi,fn)
     return J, H
 
-def jacobian_and_laplacian(fn, xi):
+def jacobian_and_laplacian(xi, fn):
     """Jacobian (d_out, d_x) and Laplacian (d_out,)."""
     J, H = jacobian_and_hessian(fn, xi)
     return J, H.diagonal(dim1=-2, dim2=-1).sum(-1)

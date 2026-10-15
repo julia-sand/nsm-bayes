@@ -8,6 +8,7 @@ from scipy.stats import chi2
 from torch.func import hessian, jacrev, vmap
 from tqdm import tqdm
 
+from nsm_bayes.inference.general.train import compute_theta_hat_true_general
 from nsm_bayes.method import (
     compute_posterior_conjugate,
     get_div_term_single,

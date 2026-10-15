@@ -1,16 +1,19 @@
-"""Regression tests for ``scripts/conjugate/run_sir.py``.
+"""Regression tests for the SIR experiment (conjugate variant).
 
 SIR data is misspecified/contaminated, so the pseudo-true parameter is not
-``cfg.theta_true``. The checks are that the pipeline runs end to end and
+``cfg.theta_true``.  The checks are that the pipeline runs end to end and
 produces structurally valid, non-negative summary statistics and a valid
-Case-1 posterior.
+Case-1 posterior.  The data files must also be bit-identical to the ones
+the normflow variant writes for the same seed.
 """
 from __future__ import annotations
 
 import pytest
 import torch
 
+from nsm_bayes.experiments import common, sir
 from scripts.conjugate import run_sir
+from scripts.normflow import run_sir as run_sir_normflow
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
@@ -18,7 +21,7 @@ from tests.conftest import assert_posterior_artifacts, load_tensor
 def sir_run(sir_cfg, tmp_path):
     """Run one tiny SIR experiment into ``tmp_path`` and return the save dir."""
     save_dir = tmp_path / "sir_conjugate"
-    run_sir._run(cfg=sir_cfg, save_dir=save_dir)
+    common.run_experiment(sir_cfg, sir, common.run_conjugate_method, save_dir)
     return save_dir
 
 
@@ -43,11 +46,35 @@ def test_sir_case1_posterior(sir_run, sir_cfg):
     )
 
 
+def test_sir_nets_saved(sir_run):
+    """The Case-1 nets and standardizers are saved with the expected keys."""
+    nets = torch.load(sir_run / "conjugate_nets_0.pt", map_location="cpu", weights_only=False)
+    for key in (
+        "T_phi_state_dict",
+        "B_phi_state_dict",
+        "standardizer_x_state_dict",
+        "standardizer_theta_state_dict",
+        "config",
+    ):
+        assert key in nets, f"conjugate_nets missing {key!r}"
+
+
+def test_sir_data_identical_across_methods(sir_cfg, tmp_path):
+    """Both method variants produce identical data for the same seed."""
+    nf_dir = tmp_path / "sir_nf"
+    common.run_experiment(sir_cfg, sir, common.run_normflow_methods, nf_dir)
+    cj_dir = tmp_path / "sir_cj"
+    common.run_experiment(sir_cfg, sir, common.run_conjugate_method, cj_dir)
+    for name in ("theta", "x_sim", "x_obs", "x_obs_mis", "is_contam"):
+        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
+                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
+
+
 def test_sir_prior_matches_config():
     """The built-in prior matches the hyperparameters in ``configs/sir.yaml``."""
     from omegaconf import OmegaConf
 
-    from nsm_bayes.simulators.benchmark_simulators.simulators import SIRSimulator
+    from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 
     cfg = OmegaConf.load("configs/sir.yaml")
     prior = SIRSimulator().prior()

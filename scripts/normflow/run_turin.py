@@ -1,215 +1,28 @@
-import pickle
-import time
+"""Normalising-flow method for the Turin channel-model experiment.
+
+Hydra entry point; see :mod:`nsm_bayes.experiments.turin` for the
+experiment-specific data generation.
+"""
+from __future__ import annotations
+
 from pathlib import Path
 
 import hydra
-import torch
 from hydra.utils import get_original_cwd
 from omegaconf import DictConfig
 
-from nsm_bayes.gpc import calibrate_beta
-from nsm_bayes.method import (
-    ScoreMatchingLogPosterior,
-    robust_mean_cov,
-    sigma_inverse,
-)
-from nsm_bayes.models.general import make_nle_logprob, train_normflow
-from nsm_bayes.models.general.normflow import run_mcmc
-from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
-from nsm_bayes.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils import set_seed
+from nsm_bayes.experiments import common, turin
 
-
-def _run(cfg: DictConfig, save_dir: Path):
-
-    #####------Load config values-----######
-    num_repeat = cfg.num_repeat # Number of repetitions of the experiment
-
-    dtype = torch.float32
-    theta_true = torch.log(torch.tensor(cfg.theta_true, dtype=dtype)) # True parameter value
-
-    n_obs = cfg.n_obs # Number of observed data samples
-    n_sim = cfg.num_samples # Number of training data samples
-
-    epsilon = cfg.epsilon # Percentage of outliers in the observed data
-
-    d_x = cfg.d_x # Data dimension
-
-    # Setting directory for saving data
-    save_dir.mkdir(parents=True, exist_ok=True) # Create the directory
-
-    # Initialize the Turin channel model simulator
-    sim = TurinSimulator(
-        B=cfg.B_hz,
-        Ns=cfg.Ns,
-        device=cfg.device,
-        prior_mean=torch.tensor(list(cfg.prior_mean), dtype=dtype) if "prior_mean" in cfg else None,
-        prior_cov=torch.tensor([list(r) for r in cfg.prior_cov], dtype=dtype) if "prior_cov" in cfg else None,
-        )
-
-    # Gaussian prior (configs/turin.yaml)
-    prior = sim.prior()
-
-    prior_mean = prior.loc
-    d_theta = prior_mean.shape[0]  # Number of parameters
-    prior_cov = prior.covariance_matrix
-
-    for ind in range(num_repeat):
-
-        set_seed(cfg.seed_offset + ind)
-
-        #######-------Generate training data-----######
-        start_time = time.perf_counter() # Record the start time
-
-
-        theta, x_sim = sim.generate_training_data(prior, n_sim)
-
-        #####-----Train NLE using sbi library----#####
-        dev = x_sim.device
-        x_sim = x_sim.to(device=dev, dtype=dtype)
-        theta = theta.to(device=dev, dtype=dtype)
-
-        likelihood_estimator = train_normflow(
-            theta, x_sim, prior, density_estimator=cfg.density_estimator
-        )
-
-        end_time = time.perf_counter() # Record the end time
-        cost_nle_training = end_time - start_time
-
-        # Save the time taken to train the NLE
-        with open(save_dir / f"cost_nle_training_{ind}.pkl", "wb") as f:
-            pickle.dump(cost_nle_training, f)
-
-        # Save the training data
-        with open(save_dir / f"theta_{ind}.pkl", "wb") as f:
-            pickle.dump(theta, f)
-        with open(save_dir / f"x_sim_{ind}.pkl", "wb") as f:
-            pickle.dump(x_sim, f)
-
-        #######-------Generate observed data-----######
-        x_obs_mis = sim.generate_observed_data(
-            theta_true,
-            n_obs=n_obs,
-            epsilon=epsilon,   # % outliers
-        )
-        x_obs_mis = x_obs_mis.to(device=dev, dtype=dtype)
-
-        # Save the observed data with outliers
-        with open(save_dir / f"x_obs_mis_{ind}.pkl", "wb") as f:
-            pickle.dump(x_obs_mis, f)
-
-        start_time = time.perf_counter() # Record the start time
-        
-        # NLE posterior samples under misspecification
-        samples_nle_mis = run_mcmc(x_obs_mis, likelihood_estimator,
-                num_pos_samples = cfg.num_posterior_samples,
-                num_chains = cfg.num_chains,
-                num_workers=cfg.num_chains,
-                thin = cfg.thin,
-                warmup_steps = cfg.warmup_steps)
-        end_time = time.perf_counter() # Record the end time
-        cost_nle_mcmc = end_time - start_time
-
-        # Save the time taken
-        with open(save_dir / f"cost_nle_mcmc_{ind}.pkl", "wb") as f:
-            pickle.dump(cost_nle_mcmc, f)
-
-        with open(save_dir / f"samples_nle_mis_{ind}.pkl", "wb") as f:
-            pickle.dump(samples_nle_mis, f)
-
-        #######-------Run neural score-matching Bayes------#######
-
-        mu_hat, Sigma_hat = robust_mean_cov(x_obs_mis)
-        Sigma_inv = sigma_inverse(Sigma_hat)
-
-        start_time = time.perf_counter()
-        # Initial run of MCMC
-        sm_lp_base = ScoreMatchingLogPosterior(
-            x_obs=x_obs_mis,
-            prior=prior,
-            beta=cfg.beta_base_general,
-            q_phi_log_prob=likelihood_estimator,
-            mu_hat=mu_hat, Sigma_inv=Sigma_inv, weight_type="imq"
-        )
-
-        theta_samples_base = run_multivariate_slice_sampler_tuned(
-            log_posterior_fn=sm_lp_base,
-            prior=prior,
-            num_samples=cfg.num_posterior_samples, num_chains=cfg.num_chains, warmup_steps=cfg.warmup_steps, thin=cfg.thin
-        )
-        theta_samples_base = torch.from_numpy(theta_samples_base).to(x_obs_mis.dtype).to(x_obs_mis.device)
-
-        def refresh_sampler_at(beta_new: float) -> torch.Tensor:
-            sm_lp = ScoreMatchingLogPosterior(
-                x_obs=x_obs_mis, prior=prior, beta=beta_new,
-                q_phi_log_prob=likelihood_estimator,
-                mu_hat=mu_hat, Sigma_inv=Sigma_inv, weight_type="imq"
-            )
-            arr = run_multivariate_slice_sampler_tuned(
-                log_posterior_fn=sm_lp, prior=prior,
-                num_samples=cfg.num_posterior_samples, num_chains=cfg.num_chains, warmup_steps=cfg.warmup_steps, thin=cfg.thin
-            )
-            return torch.from_numpy(arr).to(x_obs_mis.dtype).to(x_obs_mis.device)
-
-        beta, history_general = calibrate_beta(
-            theta_samples_base=theta_samples_base,
-            beta_base=cfg.beta_base_general,
-            x_obs=x_obs_mis,
-            q_phi_log_prob=make_nle_logprob(likelihood_estimator),
-            mu_hat=mu_hat,
-            Sigma_inv=Sigma_inv,
-            weight_type="imq",
-            alpha=cfg.alpha,
-            B=cfg.B,
-            T=cfg.T,
-            beta_min=cfg.beta_min_general,
-            refresh_sampler=refresh_sampler_at
-        )
-
-        log_posterior_calculator = ScoreMatchingLogPosterior(
-            x_obs=x_obs_mis,
-            prior=prior,
-            beta=beta,
-            q_phi_log_prob=likelihood_estimator,
-            mu_hat=mu_hat,
-            Sigma_inv=Sigma_inv,
-            weight_type="imq"
-        )
-
-        samples_sm_general = run_multivariate_slice_sampler_tuned(
-            log_posterior_fn=log_posterior_calculator,
-            prior=prior,
-            num_samples=cfg.num_posterior_samples,
-            num_chains=cfg.num_chains,
-            warmup_steps=cfg.warmup_steps,
-            thin=cfg.thin
-        )
-
-        end_time = time.perf_counter() # Record the end time
-        cost_sm_general_mcmc = end_time - start_time
-        # Save the time
-        with open(save_dir / f"cost_sm_general_mcmc_{ind}.pkl", "wb") as f:
-            pickle.dump(cost_sm_general_mcmc, f)
-
-        with open(save_dir / f"samples_sm_general_{ind}.pkl", "wb") as f:
-            pickle.dump(samples_sm_general, f)
-
-        with open(save_dir / f"gpc_history_general_{ind}.pkl", "wb") as f:
-            pickle.dump(history_general, f)
-        with open(save_dir / f"beta_general_{ind}.pkl", "wb") as f:
-            pickle.dump(beta, f)
-
-        #########-----Compute conjugate posterior (Case 1)-------#######
-        start_time = time.perf_counter() # Record the start time
-        
-        print("Iteration number: ", ind)
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="turin")
 def run_turin(cfg: DictConfig):
-    """Hydra entry point for the run_turin experiment."""
-    save_dir = (Path(get_original_cwd()) / "data" / cfg.experiment_name / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}")
-    _run(cfg=cfg, save_dir=save_dir)
+    """Hydra entry point for the Turin channel-model experiment."""
+    save_dir = (
+        Path(get_original_cwd()) / "data" / cfg.experiment_name
+        / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}"
+    )
+    common.run_experiment(cfg, turin, common.run_normflow_methods, save_dir)
+
 
 if __name__ == "__main__":
     run_turin()
-
