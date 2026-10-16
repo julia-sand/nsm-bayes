@@ -7,11 +7,6 @@ from nsm_bayes.utils.linalg import sigma_inverse
 
 # functions for getting statistics of observed data
 
-def median_heuristic(x):
-    dists = torch.cdist(x, x)
-    med = torch.median(dists[dists > 0])
-    return med**2
-
 
 #######----Function to compute robust mean and covariance ----######
 def robust_mean_cov(x_obs):

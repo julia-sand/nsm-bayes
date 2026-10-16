@@ -3,13 +3,8 @@ import torch
 from torch import nn
 
 from nsm_bayes.models.conjugate.bphi_net import BphiNet
-from nsm_bayes.models.conjugate.conj_posterior import (
-    compute_posterior_conjugate,
-)
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
-from nsm_bayes.utils.statistics import estimate_stats
-from nsm_bayes.utils.weightfuns import weight_function
 
 
 class TorchStandardizer(nn.Module):
@@ -73,36 +68,7 @@ class ConjugateModel(nn.Module):
         )
         return self
     
-    def calibrated_posterior(self, 
-                x_obs, 
-                beta, 
-                prior_mean, 
-                prior_cov, 
-                robust=True, 
-                c=1.0):
-
-        #normalise x values 
-        x_n = self.standardizer_x(x_obs)
-
-        #get the normalised model's mean and variance
-        s, m = self.standardizer_theta.std, self.standardizer_theta.mean
-
-        mu_hat_obs, Sigma_inv = estimate_stats(x_n,robust=robust)
         
-        mu_n_normalized, Sigma_n_normalized = compute_posterior_conjugate(
-                    x_n, self, beta,
-                    self.standardizer_theta(prior_mean), prior_cov / torch.outer(s, s),
-                    imq_weight, mu_hat_obs, Sigma_inv, c)
-        
-        mu_n = mu_n_normalized * s + m
-        
-        Sigma_n = Sigma_n_normalized * torch.outer(s, s) 
-
-        return mu_n, Sigma_n
-        
-    def sample_posterior(self):
-        pass
-
     def save_checkpoint(self,cfg,save_dir,ind):
         # Save the trained neural nets
         torch.save({

@@ -19,15 +19,12 @@ import torch
 from sbi.inference import SNLE
 from torch.distributions import MultivariateNormal
 
-from nsm_bayes.gpc import calibrate_beta
-from nsm_bayes.models.general.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.utils.statistics import estimate_stats
+from nsm_bayes.models.general.posterior2 import GeneralPosterior, MCMCSettings
 
 __all__ = [
     "train_normflow",
     "make_nle_logprob",
     "run_mcmc",
-    "calibrate_beta_normflow",
 ]
 
 def make_normflow_model(
@@ -178,97 +175,3 @@ def run_mcmc(
     )
     
     return posterior_samples
-
-
-def calibrate_beta_normflow(
-    flow,
-    x_obs: torch.Tensor,
-    prior: MultivariateNormal,
-    beta_base: float,
-    robust: bool = True,
-    c: float = 1.0,
-    alpha: float = 0.05,
-    B: int = 100,
-    T: int = 20,
-    beta_min: float = 0.01,
-    num_samples: int = 500,
-    num_chains: int = 1,
-    warmup_steps: int = 500,
-    thin: int = 1,
-) -> tuple[float, dict]:
-    """Calibrate ``beta`` for the general (normalising-flow) method.
-
-    Runs the bootstrap-coverage calibration (``gpc.calibrate_beta``) with
-    the flow as likelihood estimator.  ``mu_hat`` and ``Sigma_inv`` are
-    computed the same way the general posterior uses them (robust or
-    sample statistics, then ``sigma_inverse``) and the posterior samples
-    for the initial run and every refresh are drawn with the same
-    slice-sampler call the final posterior uses, so the calibration and
-    the posterior cannot drift apart.
-
-    Parameters
-    ----------
-    flow : torch.nn.Module
-        Trained likelihood estimator (``log_prob(x, theta)``).
-    x_obs : torch.Tensor
-        Observed data, shape ``(n, d_x)``.
-    prior : torch.distributions.MultivariateNormal
-        Prior distribution over the parameters.
-    beta_base : float
-        Starting value of ``beta``; the initial slice-sampler run is drawn
-        at this value.
-    robust : bool, default True
-        If true use robust (median / MCD) data statistics, otherwise plain
-        sample moments.
-    c : float, default 1.0
-        Scale parameter of the IMQ weight.
-    alpha : float, default 0.05
-        Significance level; ``1 - alpha`` is the target coverage.
-    B : int, default 100
-        Number of bootstraps per calibration iteration.
-    T : int, default 20
-        Number of stochastic-approximation iterations.
-    beta_min : float, default 0.01
-        Lower bound for ``beta``.
-    num_samples : int, default 500
-        Posterior samples per slice-sampler chain.
-    num_chains : int, default 1
-        Number of slice-sampler chains.
-    warmup_steps : int, default 500
-        Warmup steps per chain.
-    thin : int, default 1
-        Thinning factor.
-
-    Returns
-    -------
-    tuple[float, dict]
-        The calibrated ``beta`` and the history of betas and coverages.
-    """
-    mu_hat, Sigma_inv = estimate_stats(x_obs, robust)
-
-    theta_samples_base = sample_general_posterior(
-        x_obs, prior, flow, beta_base, mu_hat, Sigma_inv,
-        num_samples, num_chains, warmup_steps, thin,
-    )
-
-    def refresh_sampler_at(beta_new: float) -> torch.Tensor:
-        return sample_general_posterior(
-            x_obs, prior, flow, beta_new, mu_hat, Sigma_inv,
-            num_samples, num_chains, warmup_steps, thin,
-        )
-
-    return calibrate_beta(
-        theta_samples_base=theta_samples_base,
-        beta_base=beta_base,
-        x_obs=x_obs,
-        q_phi_log_prob=make_nle_logprob(flow),
-        mu_hat=mu_hat,
-        Sigma_inv=Sigma_inv,
-        weight_type="imq",
-        c=c,
-        alpha=alpha,
-        B=B,
-        T=T,
-        beta_min=beta_min,
-        refresh_sampler=refresh_sampler_at,
-    )

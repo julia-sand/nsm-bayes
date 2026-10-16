@@ -20,16 +20,13 @@ from typing import Any, Callable, Generator
 import torch
 from omegaconf import DictConfig
 
-from nsm_bayes.gpc import calibrate_beta_gpc
+from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
+from nsm_bayes.inference.general.calibrate import calibrate_beta
 from nsm_bayes.models.conjugate import ConjugateModel
+from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general import train_normflow
-from nsm_bayes.models.general.normflow import (
-    sample_general_posterior,
-    calibrate_beta_normflow,
-    run_mcmc,
-)
+from nsm_bayes.models.general.normflow import run_mcmc
 from nsm_bayes.utils import set_seed
-from nsm_bayes.utils.statistics import estimate_stats
 
 __all__ = [
     "ExperimentData",
@@ -129,32 +126,22 @@ def run_normflow_methods(
             thin=cfg.thin,
             warmup_steps=cfg.warmup_steps,
         )
+
     save(save_dir, "samples_nle_mis", rep, samples_nle_mis)
 
     #estimate the robust statistics
     robust = cfg.get("robust_flag", True)
-    mu_hat, Sigma_inv = estimate_stats(x_obs_mis, robust)
-
+    posterior = GeneralPosterior(flow=flow, x_obs=x_obs_mis, prior=prior,
+                                mcmc=MCMCSettings.from_cfg(cfg), robust=cfg.robust_flag)
+    
     #calibrate beta / temperature
     with timed(save_dir, "sm_general_mcmc", rep):
-        beta, history = calibrate_beta_normflow(
-            flow,
-            x_obs_mis,
-            prior,
-            beta_base=cfg.beta_base_general,
-            robust=robust,
-            alpha=cfg.alpha,
-            B=cfg.B,
-            T=cfg.T,
-            beta_min=cfg.get("beta_min_general", 0.01),
-            num_samples=cfg.num_posterior_samples,
-            num_chains=cfg.num_chains,
-            warmup_steps=cfg.warmup_steps,
-            thin=cfg.thin,
-        )
-        samples_sm_general = sample_general_posterior(
-            x_obs_mis, prior, flow, beta, mu_hat, Sigma_inv, cfg
-        )
+        beta, history = calibrate_beta(posterior, beta_base=cfg.beta_base_general,
+                                        alpha=cfg.alpha, B=cfg.B, T=cfg.T,
+                                        beta_min=cfg.get("beta_min_general", 0.01))
+        
+        samples_sm_general = posterior.sample(beta)
+
     save(save_dir, "samples_sm_general", rep, samples_sm_general)
     save(save_dir, "gpc_history_general", rep, history)
     save(save_dir, "beta_general", rep, beta)
@@ -177,44 +164,45 @@ def run_conjugate_method(
     ``beta_case1`` and ``cost_sm_case1_posterior`` for this repetition.
     """
     x_obs_mis = data.x_obs_mis
-    prior_mean = prior.loc
-    prior_cov = prior.covariance_matrix
-    d_theta = prior_mean.shape[0]
+    d_theta = data.theta.shape[1]
 
     #define the energy model
     model = ConjugateModel(
-        d_x=cfg.d_x, d_theta=d_theta, hidden_dim=cfg.hidden_dim
-    )
+        d_x=cfg.d_x, d_theta=d_theta, hidden_dim=cfg.hidden_dim)
     dev = x_obs_mis.device
     model = model.to(device=dev, dtype=x_obs_mis.dtype)
 
     #train the model
     with timed(save_dir, "sm_case1_train", rep):
         model.fit(x_sim=data.x_sim, theta_sim=data.theta)
+    
     model.save_checkpoint(cfg, save_dir, rep)
+
+    posterior = ConjugatePosterior(
+        model,
+        prior.loc,
+        prior.covariance_matrix,
+        robust=cfg.robust_flag,
+        weight_type="imq",
+    )
 
     with timed(save_dir, "sm_case1_posterior", rep):
         #calibrate the temperature
         beta, history = calibrate_beta_gpc(
             x_obs_mis,
-            model,
-            prior_mean=prior_mean,
-            prior_cov=prior_cov,
+            posterior,
             initial_beta=cfg.beta_base_case1,
             target_coverage=1.0 - cfg.alpha,
             num_iterations=cfg.T,
             num_bootstraps=cfg.B,
             beta_min=cfg.get("beta_min_case1", 0.01),
-            robust=robust,
         )
+
         #compute robust posterior
-        mu_n, Sigma_n = model.calibrated_posterior(
+        mu_n, Sigma_n = posterior.calibrated_posterior(
             x_obs_mis,
-            beta,
-            prior_mean,
-            prior_cov,
-            cfg.get("robust_flag", True),
-        )
+            beta)
+
     save(save_dir, "posterior_mean_case1", rep, mu_n)
     save(save_dir, "posterior_covariance_case1", rep, Sigma_n)
     save(save_dir, "gpc_history_case1", rep, history)

@@ -1,7 +1,6 @@
 """Shared utilities for MCMC sampling and robust statistics."""
 from __future__ import annotations
 
-import numpy as np
 import torch
 from torch.func import jacfwd, jacrev
 
@@ -72,21 +71,6 @@ def _single(fn):
     """Wrap fn: (1, d_x) -> (1, d_out) as (d_x,) -> (d_out,)."""
     return lambda x: fn(x.unsqueeze(0)).squeeze(0)
 
-
-def _squeeze_scalar_jacobian(J, xi, fn):
-    """Squeeze the output dim of J if fn is scalar-valued.
-
-    When fn maps to a scalar (output shape (1,) in batched mode),
-    jacrev returns J with shape (1, d_x). Squeeze to (d_x,) so
-    downstream code treats it as a 1-D gradient vector.
-    """
-    if J.dim() == 2 and J.shape[0] == 1:
-        out = fn(xi.unsqueeze(0)).squeeze(0)
-        if out.dim() == 1 and out.shape[0] == 1:
-            J = J.squeeze(0)
-    return J
-
-
 def jacobian_with_spare(xi, fn):
     """Jacobian of fn at xi, returned twice.
 
@@ -97,13 +81,12 @@ def jacobian_with_spare(xi, fn):
     If fn is scalar-valued, J is squeezed from (1, d_x) to (d_x,).
     """
     J = jacrev(_single(fn))(xi)                              # (d_out, d_x)
-    J = _squeeze_scalar_jacobian(J, xi, fn)
     return J, J
 
 def jacobian(xi, fn):
     """(d_out, d_x), or (d_x,) if fn is scalar-valued."""
     J = jacrev(_single(fn))(xi)
-    return _squeeze_scalar_jacobian(J, xi, fn)
+    return J
 
 
 def jacobian_and_hessian(xi, fn):
@@ -116,7 +99,6 @@ def jacobian_and_laplacian(xi, fn):
     J, H = jacobian_and_hessian(xi, fn)
     return J, H.diagonal(dim1=-2, dim2=-1).sum(-1)
 
-# Define the calculation for a single data point
 def get_cov_term_single(xi, fn, Jac=None):
     #returns a copy of the jacobian for reuse
     if Jac is None:
@@ -140,7 +122,7 @@ def get_div_term_single(xi,fn,w2,grad_w2):
     # 1. Compute Laplacian of T_phi: Tr(Hess(T_phi))
     jac_T,lap_T  = jacobian_and_laplacian(xi,fn)
 
-    grad_w2 = grad_w2.squeeze(0)
+    #grad_w2 = grad_w2.squeeze(0)
     
     divergence = grad_w2 @ jac_T.T + w2 * lap_T
     

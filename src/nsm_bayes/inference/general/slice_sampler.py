@@ -50,7 +50,6 @@ def run_multivariate_slice_sampler_tuned(
     print(f"Collected {final_samples.shape[0]} total samples from {num_chains} chains.")
     return final_samples
 
-
 def _run_single_chain_multivariate_tuned(
     chain_id,
     log_posterior_fn,
