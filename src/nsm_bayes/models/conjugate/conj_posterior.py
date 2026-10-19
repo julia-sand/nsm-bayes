@@ -9,7 +9,7 @@ from nsm_bayes.utils.linalg import (
     get_div_term_single,
 )
 
-from nsm_bayes.utils.weightfuns import weight_function
+from nsm_bayes.utils.weights import weight_function
 from nsm_bayes.utils.statistics import estimate_stats
 
 class ConjugatePosterior():
