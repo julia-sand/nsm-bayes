@@ -44,8 +44,7 @@ def train_q_phi(  #add training params to be passed explicitly?
     
     # --- 2. Define Fixed `Sigma_inv` Internally ---
     # Assumes unweighted score matching loss
-    d_x = x_sim.shape[1]
-    Sigma_inv = torch.eye(d_x, device=x_sim.device)
+    Sigma_inv = torch.eye(x_sim.shape[1], device=x_sim.device)
 
     # --- 3. Setup Optimizer and DataLoaders ---
     params_to_train = list(T_phi_net.parameters()) + list(b_phi_net.parameters())

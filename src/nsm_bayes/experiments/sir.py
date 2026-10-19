@@ -33,20 +33,17 @@ def build_problem(cfg: DictConfig) -> tuple:
         unconstrained (log/logit) parameter space.
     """
     dtype = torch.float32
-    prior_mean = torch.tensor([
-        torch.log(torch.tensor(cfg.prior_mean[0])),    # log beta
-        torch.log(torch.tensor(cfg.prior_mean[1])),    # log gamma
-        torch.logit(torch.tensor(cfg.prior_mean[2])),  # logit rho
-        torch.log(torch.tensor(cfg.prior_mean[3])),    # log I0
-    ], dtype=dtype)
     prior_std = torch.tensor(cfg.prior_std, dtype=dtype)
     prior_cov = torch.diag(prior_std**2)
 
     sim = SIRSimulator(
         obs_model=cfg.obs_model if "obs_model" in cfg else "poisson",
-        prior_mean=prior_mean,
+        prior_mean=torch.tensor(list(cfg.prior_mean),dtype=dtype),
         prior_cov=prior_cov,
+        T=cfg.T_sir,
+        N=cfg.N_sir,
     )
+
     prior = sim.prior()
 
     # True parameter in unconstrained space
@@ -58,9 +55,7 @@ def build_problem(cfg: DictConfig) -> tuple:
 
 def generate_data(
     sim: SIRSimulator,
-    prior: MultivariateNormal,
     theta_true: torch.Tensor,
-    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the SIR data.
@@ -69,8 +64,6 @@ def generate_data(
     ----------
     sim : nsm_bayes.simulators.benchmark_simulators.sir.SIRSimulator
         The simulator returned by :func:`build_problem`.
-    prior : torch.distributions.MultivariateNormal
-        The prior returned by :func:`build_problem`.
     theta_true : torch.Tensor
         True parameter vector in unconstrained space (shape ``(4,)``).
     d_x : int
@@ -84,24 +77,21 @@ def generate_data(
         Training data ``(theta, x_sim)`` and observed data; the extras
         hold the contamination mask ``is_contam``.
     """
-    N = cfg.N_sir
-    T = cfg.T_sir
-    theta, _y_sim, x_sim = sim.generate_training_data(prior, cfg.num_samples, T, N)
 
+    #training data for surrogate density 
+    theta, y_sim = sim.generate_training_data(cfg.num_samples, )
+    x_sim = sim.summary(y_sim)
+
+    #clean data set 
     theta_batch = theta_true.unsqueeze(0).repeat(cfg.n_obs, 1)
-    y_obs = sim.simulate(theta_batch, T=T, N=N)
-    x_obs = sim.summary(y_obs, N)
+    y_obs = sim.simulate(theta_batch)
+    x_obs = sim.summary(y_obs)
 
-    y_obs_mis, is_contam, _theta_used = simulate_contaminated_dataset(
-        theta_true=theta_true,
-        n_obs=cfg.n_obs,
-        simulate_fn=sim.simulate,
-        T=T,
-        N=N,
-        epsilon=cfg.epsilon,
-        prior=prior,
-    )
-    x_obs_mis = sim.summary(y_obs_mis, N)
+    #mis-specified data set
+    y, is_contam = sim.generate_contaminated_data(theta_true=theta_true,
+                                               n_obs=cfg.n_obs,
+                                               epsilon=cfg.epsilon,)
+    x_obs_mis = sim.summary(y)
 
     return ExperimentData(
         theta=theta,

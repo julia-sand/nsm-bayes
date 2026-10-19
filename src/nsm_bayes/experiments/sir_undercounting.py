@@ -36,9 +36,7 @@ def build_problem(cfg: DictConfig) -> tuple:
 
 def generate_data(
     sim: SIRSimulator,
-    prior: MultivariateNormal,
     theta_true,
-    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the SIR undercounting data.
@@ -63,22 +61,27 @@ def generate_data(
         the extras hold the clean trajectories ``y_obs`` and the
         contamination mask ``is_contam``.
     """
-    N = cfg.N_sir
-    T = cfg.T_sir
-    theta = prior.sample((cfg.num_samples,))
-    y_sim = sim.simulate(theta, T=T, N=N)
-    x_sim = sim.summary(y_sim, N)
+    
+    #training data for surrogate density 
+    theta, x_sim = sim.generate_training_data(cfg.num_samples, )
 
+    #clean data set 
     theta_batch = theta_true.unsqueeze(0).repeat(cfg.n_obs, 1)
-    y_obs = sim.simulate(theta_batch, T=T, N=N)
-    y_cor, is_contam = apply_undercounting_trajectory(
-        y_obs, epsilon=cfg.epsilon, q=cfg.q, per_time=False
-    )
-    x_obs_mis = sim.summary(y_cor, N)
+    y_obs = sim.simulate(theta_batch)
+    x_obs = sim.summary(y_obs)
+
+    #mis-specified data set
+    y_obs_mis, is_contam = sim.apply_undercounting_trajectory(y_obs,
+                                               epsilon=cfg.epsilon,
+                                               q = cfg.q)
+    x_obs_mis = sim.summary(y_obs_mis)
 
     return ExperimentData(
         theta=theta,
         x_sim=x_sim,
         x_obs_mis=x_obs_mis,
-        extras={"y_obs": y_obs, "is_contam": is_contam},
+        x_obs=x_obs,
+        extras={"is_contam": is_contam},
     )
+
+

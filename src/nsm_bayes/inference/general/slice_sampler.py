@@ -6,10 +6,7 @@ from joblib import Parallel, delayed
 def run_multivariate_slice_sampler_tuned(
     log_posterior_fn,
     prior,
-    num_samples,
-    num_chains=4,
-    warmup_steps=1000,
-    thin=10,
+    mcmcsettings,
     initial_w=1.0,
     n_jobs=1,
     seed=None,
@@ -20,10 +17,10 @@ def run_multivariate_slice_sampler_tuned(
     if seed is not None:
         np.random.seed(seed)
 
-    total_steps_per_chain = (warmup_steps + num_samples) * thin
-    initial_thetas = prior.sample((num_chains,)).numpy()
+    total_steps_per_chain = (mcmcsettings.warmup_steps + mcmcsettings.num_samples) * mcmcsettings.thin
+    initial_thetas = prior.sample((mcmcsettings.num_chains,)).numpy()
 
-    print(f"Running {num_chains} slice-sampler chains for {total_steps_per_chain} steps each...")
+    print(f"Running {mcmcsettings.num_chains} slice-sampler chains for {total_steps_per_chain} steps each...")
 
     all_chains_samples_raw = Parallel(n_jobs=n_jobs, prefer="threads")(
         delayed(_run_single_chain_multivariate_tuned)(
@@ -31,24 +28,33 @@ def run_multivariate_slice_sampler_tuned(
             log_posterior_fn,
             initial_thetas[i],
             total_steps_per_chain,
-            warmup_steps,
+            mcmcsettings.warmup_steps,
             initial_w,
         )
-        for i in range(num_chains)
+        for i in range(mcmcsettings.num_chains)
     )
 
     print("All chains complete.")
 
     final_samples = []
     for chain_samples_raw in all_chains_samples_raw:
-        thinned_chain = chain_samples_raw[::thin]
+        thinned_chain = chain_samples_raw[::mcmcsettings.thin]
         # Discard the warmup samples from the *thinned* chain
-        processed_chain = thinned_chain[int(warmup_steps / thin) :]
+        processed_chain = thinned_chain[int(mcmcsettings.warmup_steps / mcmcsettings.thin) :]
         final_samples.append(processed_chain)
 
     final_samples = np.vstack(final_samples)
-    print(f"Collected {final_samples.shape[0]} total samples from {num_chains} chains.")
+    print(f"Collected {final_samples.shape[0]} total samples from {mcmcsettings.num_chains} chains.")
     return final_samples
+
+def log_posterior_wrapper(a,theta_current,direction,log_posterior_fn):
+    
+    v = float(log_posterior_fn(theta_current + a * direction))
+    if np.isnan(v):
+        raise FloatingPointError(f"log-posterior is NaN at offset a={a}")
+
+    return v
+
 
 def _run_single_chain_multivariate_tuned(
     chain_id,
@@ -74,7 +80,7 @@ def _run_single_chain_multivariate_tuned(
         direction = np.random.randn(d_theta)
         direction /= np.linalg.norm(direction)
 
-        log_posterior_1d = lambda a: float(log_posterior_fn(theta_current + a * direction))
+        log_posterior_1d = lambda a: log_posterior_wrapper(a,theta_current,direction,log_posterior_fn)
 
         # One 1-D slice step along that direction
         a_new, final_bracket_width = _slice_sampler_1d_adaptive(
@@ -101,10 +107,12 @@ def _slice_sampler_1d_adaptive(log_p_1d, current_val, w=1.0, max_step_out=1000):
     """
     1-D slice sampling step with adaptive width return.
     """
+
     log_p_current = log_p_1d(current_val)
-    if np.isneginf(log_p_current):
-        print("Warning: log-posterior = −inf at current point.")
-        return current_val, w
+    
+    if not np.isfinite(log_p_current):
+        #stops silent failures here 
+        raise FloatingPointError(f"log-posterior is {log_p_current} at the current point")
 
     slice_height = log_p_current - np.random.exponential(1.0)
 
@@ -121,10 +129,13 @@ def _slice_sampler_1d_adaptive(log_p_1d, current_val, w=1.0, max_step_out=1000):
         if log_p_left <= slice_height or np.isneginf(log_p_left):
             break
         left_bound -= w
+        log_p_left = log_p_1d(left_bound) #recompute the bound
+ 
     for _ in range(max_step_out):
         if log_p_right <= slice_height or np.isneginf(log_p_right):
             break
         right_bound += w
+        log_p_right = log_p_1d(right_bound)
 
     # --- Shrinking phase ---
     for _ in range(max_step_out * 10):  # plenty of chances but bounded

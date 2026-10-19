@@ -3,6 +3,8 @@ import torch
 from torch.func import vmap
 
 from nsm_bayes.utils.linalg import (
+    jacobian_and_laplacian,
+    jacobian,
     get_cov_term_single,
     get_non_div_term_single,
     sigma_inverse,
@@ -33,6 +35,18 @@ class ConjugatePosterior():
         self.prior_cov_norm = self.prior_cov / torch.outer(self.s, self.s)
         self.prior_cov_inv = sigma_inverse(self.prior_cov_norm)
         self.prior_mean_norm = self.model.standardizer_theta(self.prior_mean)
+
+    def precompute(self, x_obs):
+        """Precompute the jacobian and laplacian functions for the observed data"""
+        self._x_obs = x_obs
+        self.x_n = self._normalise_input(x_obs)                              # (n, d_x)
+        J, lap = vmap(jacobian_and_laplacian, in_dims=(0, None))(self.x_n, self.model.T_phi)
+        grad_b = vmap(jacobian, in_dims=(0, None))(self.x_n, self.model.b_phi)   # (n, d_x)
+        self.J = J                                                           # (n, d_theta, d_x)
+        self.lap = lap                                                       # (n, d_theta)
+        self.JJ = J @ J.transpose(1, 2)                                      # (n, d_theta, d_theta)
+        self.h = (J @ grad_b.unsqueeze(-1)).squeeze(-1)                      # (n, d_theta)
+
 
     def _normalise_input(self,x_obs):
         return self.model.standardizer_x(x_obs)
@@ -114,7 +128,6 @@ class ConjugatePosterior():
     def _compute_A(self,x_n,w2):
 
         # A = sum_i w2_i * J_T(x_i)^T J_T(x_i)   (d_theta, d_theta)
-        # The networks are not batched: vmap them with in_dim=None. get_cov_term_
         # single(xi, fn) returns (J_T^T J_T, J_T); only the covariance term is kept.
         batched_cov_terms = vmap(get_cov_term_single, in_dims=(0, None))(
             x_n, self.model.T_phi

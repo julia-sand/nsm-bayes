@@ -10,7 +10,7 @@ from nsm_bayes.inference.bootstrap import (
     multinomial_bootstrap_counts,
     reweight_for_bootstrap_beta,
 )
-from nsm_bayes.models.general.posterior2 import GeneralPosterior
+from nsm_bayes.models.general.posterior import GeneralPosterior
 
 EPS = 1e-12
 

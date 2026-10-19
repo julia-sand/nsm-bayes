@@ -3,34 +3,19 @@ from __future__ import annotations
 
 import functools
 import logging
-from dataclasses import dataclass
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.func import vmap
 
-from nsm_bayes.method import nle_log_prob_safe
 from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.weights import weight_function
+from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 
 _log = logging.getLogger(__name__)
-
-@dataclass(frozen=True)
-class MCMCSettings:
-    """General configuration of an MCMC run."""
-
-    num_samples: int = 500
-    num_chains: int = 1
-    warmup_steps: int = 500
-    thin: int = 1
-
-    @classmethod
-    def from_cfg(cls, cfg) -> "MCMCSettings":
-        """Build from the existing top-level config keys."""
-        return cls(cfg.num_posterior_samples, cfg.num_chains, cfg.warmup_steps, cfg.thin)
 
 
 class GeneralPosterior:
@@ -117,10 +102,7 @@ class GeneralPosterior:
         samples = run_multivariate_slice_sampler_tuned(
                             log_posterior_fn=functools.partial(self.log_prob, beta=beta),
                             prior=self.prior,
-                            num_samples=self.mcmc.num_samples,
-                            num_chains=self.mcmc.num_chains,
-                            warmup_steps=self.mcmc.warmup_steps,
-                            thin=self.mcmc.thin,
+                            mcmcsettings=self.mcmc
                         )
         return torch.from_numpy(samples).to(dtype=self.x_obs.dtype, device=self.x_obs.device)
 

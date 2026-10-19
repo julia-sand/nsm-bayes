@@ -49,7 +49,6 @@ def imq_weight(x, mu_hat, Sigma_inv, c=1, zeta=1):
         the analytic gradient ``grad_w2`` of shape ``(n, d_x)``
         (``(d_x,)`` for a row input).
     """
-    row = x.ndim == 1
     x = _as_batch(x)
 
     d_x = x.shape[-1]
@@ -58,7 +57,7 @@ def imq_weight(x, mu_hat, Sigma_inv, c=1, zeta=1):
     Sd = Sd.reshape(x.shape)
     norm_sq = torch.sum(Sd * diff, dim=-1)
 
-    denom = 1 + norm_sq / c + 1e-12
+    denom = 1 + norm_sq / c 
     w2 = 1.0 / (denom ** (2 / zeta))
 
     coef = (-(4.0 / (zeta * c)) * denom ** (-(2 / zeta) - 1))
@@ -82,11 +81,8 @@ def unweighted(x, *args, **kwargs):
     tuple[torch.Tensor, torch.Tensor]
         ``w2`` and ``grad_w2`` matching the shape convention of ``x``.
     """
-    row = x.ndim == 1
     x = _as_batch(x)
-    w2 = torch.ones(x.shape[0], dtype=x.dtype, device=x.device)
-    grad_w2 = torch.zeros_like(x)
-    return _squeeze(x, w2, grad_w2)
+    return torch.ones(x.shape[:-1], dtype=x.dtype, device=x.device), torch.zeros_like(x)
 
 
 def huber_weight(x, mu_hat, Sigma_inv, c=1.0, eps=1e-12):
@@ -119,13 +115,10 @@ def huber_weight(x, mu_hat, Sigma_inv, c=1.0, eps=1e-12):
 
     c = torch.as_tensor(c, dtype=x.dtype, device=x.device)
 
-    d_x = x.shape[-1]
-    diff = x - mu_hat.reshape(1, d_x)
-    Sd = diff @ Sigma_inv.reshape(d_x, d_x)
-    Sd = Sd.reshape(x.shape)
-    norm_sq = torch.sum(Sd * diff, dim=-1)
+    diff = x - mu_hat
+    Sd = diff @ Sigma_inv
+    r2 = (Sd * diff).sum(-1)
 
-    r2 = norm_sq + eps                   # r^2
     inside = r2 <= c ** 2                   # equivalent to r <= c
 
     w2 = torch.where(inside, torch.ones_like(r2), c ** 2 / r2)

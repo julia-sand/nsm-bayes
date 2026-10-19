@@ -163,7 +163,6 @@ def simulate_contaminated_dataset(
     # Determine which samples are contaminated
     is_contam = torch.rand(n_obs, device=device) < epsilon
     num_contam = is_contam.sum().item()
-    num_clean = n_obs - num_contam
 
     theta_used = torch.zeros((n_obs, theta_true.shape[0]), device=device, dtype=dtype)
 
@@ -176,6 +175,7 @@ def simulate_contaminated_dataset(
         theta_used[is_contam] = theta_contam
     else:
         # Fallback: just use theta_true for now or a fixed offset
+        print("No contamination, only fixed offset.")
         theta_used[is_contam] = theta_true+1
 
     # Simulate data

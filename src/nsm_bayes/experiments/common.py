@@ -24,8 +24,10 @@ from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
 from nsm_bayes.inference.general.calibrate import calibrate_beta
 from nsm_bayes.models.conjugate import ConjugateModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
-from nsm_bayes.models.general import train_normflow
-from nsm_bayes.models.general.normflow import run_mcmc
+from nsm_bayes.models.general.normflow import GeneralModel
+from nsm_bayes.models.general.posterior import GeneralPosterior
+from nsm_bayes.models.general.mcmc_settings import MCMCSettings
+
 from nsm_bayes.utils import set_seed
 
 __all__ = [
@@ -66,10 +68,8 @@ class ExperimentData:
     x_obs: torch.Tensor | None = None
     extras: dict = field(default_factory=dict)
 
-
 # The method step signature: (data, prior, cfg, save_dir, rep) -> None.
 MethodStep = Callable[[ExperimentData, Any, DictConfig, Path, int], None]
-
 
 def save(save_dir: Path, name: str, rep: int, obj: Any) -> None:
     """Pickle ``obj`` to ``save_dir / f"{name}_{rep}.pkl"``."""
@@ -105,42 +105,44 @@ def run_normflow_methods(
     """
     x_obs_mis = data.x_obs_mis
 
+
+    #set mcmc config
+    mcmc = MCMCSettings.from_cfg(cfg)
+
+    flow = GeneralModel(prior, mcmc_settings=mcmc, density_estimator=cfg.get("density_estimator", "maf"))
+
     #train the surrogate model
     with timed(save_dir, "nle_training", rep):
-        flow = train_normflow(
+        flow.fit(
             data.theta,
             data.x_sim,
-            prior,
-            density_estimator=cfg.get("density_estimator", "maf"),
         )
-    torch.save(flow, save_dir / f"likelihood_estimator_full_{rep}.pt")
+    torch.save(flow.estimator, save_dir / f"likelihood_estimator_full_{rep}.pt")
 
-    #sample the posterior
+    #sample the baseline posterior
     with timed(save_dir, "nle_mcmc", rep):
-        samples_nle_mis = run_mcmc(
+        samples_nle_mis = flow.sample_nle_posterior(
             x_obs_mis,
-            flow,
-            num_pos_samples=cfg.num_posterior_samples,
-            num_chains=cfg.num_chains,
-            num_workers=cfg.num_chains,
-            thin=cfg.thin,
-            warmup_steps=cfg.warmup_steps,
         )
 
     save(save_dir, "samples_nle_mis", rep, samples_nle_mis)
 
     #estimate the robust statistics
-    robust = cfg.get("robust_flag", True)
-    posterior = GeneralPosterior(flow=flow, x_obs=x_obs_mis, prior=prior,
-                                mcmc=MCMCSettings.from_cfg(cfg), robust=cfg.robust_flag)
+    #set up a posterior for calibration
+    beta_posterior = GeneralPosterior(flow=flow.estimator, x_obs=x_obs_mis, prior=prior,
+                                mcmc=mcmc, robust=cfg.robust_flag)
     
     #calibrate beta / temperature
     with timed(save_dir, "sm_general_mcmc", rep):
-        beta, history = calibrate_beta(posterior, beta_base=cfg.beta_base_general,
+        theta_samples_base = beta_posterior.sample(cfg.beta_base_general)
+
+        beta, history = calibrate_beta(beta_posterior, theta_samples_base, 
+                                        beta_base=cfg.beta_base_general,
                                         alpha=cfg.alpha, B=cfg.B, T=cfg.T,
-                                        beta_min=cfg.get("beta_min_general", 0.01))
+                                        beta_min=cfg.get("beta_min_general", 0.01),
+                                        refresh_sampler=beta_posterior.sample)
         
-        samples_sm_general = posterior.sample(beta)
+        samples_sm_general = beta_posterior.sample(beta)
 
     save(save_dir, "samples_sm_general", rep, samples_sm_general)
     save(save_dir, "gpc_history_general", rep, history)
