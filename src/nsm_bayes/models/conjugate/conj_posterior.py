@@ -1,4 +1,35 @@
-"""Conjugate (neural exponential family) posterior computation."""
+r"""Closed-form generalised posterior for the conjugate NSM-Bayes method.
+
+With the surrogate :math:`\log q_\phi(x \mid \theta) = \theta^\top
+T_\phi(x) + b_\phi(x)`, the weighted score-matching loss summed over the
+observations is quadratic in :math:`\theta`,
+
+.. math::
+
+    \sum_{i=1}^n \ell(\theta; x_i) = \theta^\top A\, \theta
+        + 2\, \theta^\top B + \text{const},
+
+with
+
+.. math::
+
+    A = \sum_i w^2(x_i)\, J_T(x_i) J_T(x_i)^\top, \qquad
+    B = \sum_i \Big[ w^2(x_i)\, J_T(x_i) \nabla b(x_i)
+        + J_T(x_i) \nabla w^2(x_i) + w^2(x_i)\, \Delta T(x_i) \Big],
+
+where :math:`J_T` is the ``(d_theta, d_x)`` Jacobian of :math:`T_\phi` and
+:math:`\Delta T` its component-wise Laplacian.  With a Gaussian prior
+:math:`N(\mu_0, \Sigma_0)`, the generalised posterior
+:math:`\pi(\theta) \exp\{-\beta \sum_i \ell(\theta; x_i)\}` is Gaussian with
+
+.. math::
+
+    \Sigma_n^{-1} = \Sigma_0^{-1} + 2\beta A, \qquad
+    \Sigma_n^{-1} \mu_n = \Sigma_0^{-1} \mu_0 - 2\beta B.
+
+All of this is computed in the standardised ``x`` and ``theta`` spaces of
+the model and mapped back to original units.
+"""
 import torch
 from torch.func import vmap
 
@@ -15,6 +46,50 @@ from nsm_bayes.utils.weights import weight_function
 from nsm_bayes.utils.statistics import estimate_stats
 
 class ConjugatePosterior():
+    """Gaussian generalised posterior for a fitted :class:`ConjugateModel`.
+
+    Parameters
+    ----------
+    model : ConjugateModel
+        Trained surrogate whose standardisers have been fitted.
+    prior_mean : torch.Tensor
+        Gaussian prior mean in original ``theta`` units, shape
+        ``(d_theta,)``.
+    prior_cov : torch.Tensor
+        Gaussian prior covariance in original units, shape
+        ``(d_theta, d_theta)``.
+    robust : bool
+        If true, the weight function is centred and scaled with the median
+        and the minimum covariance determinant estimate of the
+        (standardised) data; otherwise with the sample mean and covariance.
+        See :func:`~nsm_bayes.utils.statistics.estimate_stats`.
+    weight_type : {"imq", "huber", "none"}
+        Weight function ``w`` in the score-matching loss; see
+        :func:`~nsm_bayes.utils.weights.weight_function`.
+
+    Attributes
+    ----------
+    s, m : torch.Tensor
+        Standard deviation and mean of the model's ``theta`` standardiser,
+        each of shape ``(d_theta,)``.
+    prior_mean_norm : torch.Tensor
+        Prior mean in standardised ``theta`` space.
+    prior_cov_norm : torch.Tensor
+        Prior covariance in standardised ``theta`` space.
+    prior_cov_inv : torch.Tensor
+        Inverse of `prior_cov_norm`.
+
+    See Also
+    --------
+    nsm_bayes.inference.conjugate.calibrate_beta.calibrate_beta_gpc :
+        Chooses ``beta`` for :meth:`calibrated_posterior`.
+
+    Notes
+    -----
+    The data weights are recomputed from whichever data set is passed to
+    :meth:`calibrated_posterior`, so each bootstrap resample gets its own
+    robust centre and scale.
+    """
 
     def __init__(self,
                 model,
@@ -37,7 +112,22 @@ class ConjugatePosterior():
         self.prior_mean_norm = self.model.standardizer_theta(self.prior_mean)
 
     def precompute(self, x_obs):
-        """Precompute the jacobian and laplacian functions for the observed data"""
+        """Cache per-observation derivatives of the networks at `x_obs`.
+
+        Parameters
+        ----------
+        x_obs : torch.Tensor
+            Observed data of shape ``(n, d_x)`` in original units.
+
+        Notes
+        -----
+        Sets ``x_n`` (standardised data, ``(n, d_x)``), ``J`` (Jacobians of
+        ``T_phi``, ``(n, d_theta, d_x)``), ``lap`` (Laplacians of ``T_phi``,
+        ``(n, d_theta)``), ``JJ`` (``J J^T``, ``(n, d_theta, d_theta)``) and
+        ``h`` (``J grad b_phi``, ``(n, d_theta)``). These caches are not
+        used by the other methods of this class, which recompute what they
+        need.
+        """
         self._x_obs = x_obs
         self.x_n = self._normalise_input(x_obs)                              # (n, d_x)
         J, lap = vmap(jacobian_and_laplacian, in_dims=(0, None))(self.x_n, self.model.T_phi)
@@ -49,9 +139,37 @@ class ConjugatePosterior():
 
 
     def _normalise_input(self,x_obs):
+        """Standardise data with the model's ``x`` standardiser.
+
+        Parameters
+        ----------
+        x_obs : torch.Tensor
+            Data of shape ``(n, d_x)`` in original units.
+
+        Returns
+        -------
+        torch.Tensor
+            Standardised data, same shape.
+        """
         return self.model.standardizer_x(x_obs)
 
     def _unnormalise(self,mu_n_normalized,Sigma_n_normalized):
+        """Map a Gaussian from standardised to original ``theta`` units.
+
+        Parameters
+        ----------
+        mu_n_normalized : torch.Tensor
+            Mean in standardised space, shape ``(d_theta,)``.
+        Sigma_n_normalized : torch.Tensor
+            Covariance in standardised space, shape ``(d_theta, d_theta)``.
+
+        Returns
+        -------
+        mu_n : torch.Tensor
+            ``mu * s + m``.
+        Sigma_n : torch.Tensor
+            ``Sigma * outer(s, s)``.
+        """
 
         mu_n = mu_n_normalized * self.s + self.m
         
@@ -62,7 +180,31 @@ class ConjugatePosterior():
     def calibrated_posterior(self, 
                 x_obs, 
                 beta):
-        """Posterior mean/cov in original theta units (standardise -> solve -> unstandardise)."""
+        """Compute the generalised posterior at a given ``beta``.
+
+        Parameters
+        ----------
+        x_obs : torch.Tensor
+            Observed data of shape ``(n, d_x)`` in original units.
+        beta : float
+            Learning rate (temperature) of the generalised posterior.
+
+        Returns
+        -------
+        mu_n : torch.Tensor
+            Posterior mean in original ``theta`` units, shape
+            ``(d_theta,)``.
+        Sigma_n : torch.Tensor
+            Posterior covariance in original units, shape
+            ``(d_theta, d_theta)``.
+
+        Notes
+        -----
+        The data are standardised, the weights ``w^2`` and ``grad w^2`` are
+        computed from the standardised data, the Gaussian posterior is
+        solved in standardised space (see the module docstring) and the
+        result is mapped back with :meth:`_unnormalise`.
+        """
 
         #normalise x values 
         #x_n = self.model.standardizer_x(x_obs)
@@ -83,8 +225,21 @@ class ConjugatePosterior():
 
     #######----Function to compute posterior precision matrix for NSM-Bayes-conj----######
     def _compute_posterior_precision_conjugate(self, x_n, beta, w2):
-        """
-        Computes the posterior precision matrix (inverse covariance) for the model.
+        """Posterior precision ``Sigma_0^{-1} + 2 * beta * A`` (standardised space).
+
+        Parameters
+        ----------
+        x_n : torch.Tensor
+            Standardised data of shape ``(n, d_x)``.
+        beta : float
+            Learning rate of the generalised posterior.
+        w2 : torch.Tensor
+            Squared weights ``w(x_i)^2``, shape ``(n,)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Precision matrix of shape ``(d_theta, d_theta)``.
         """
         
         # Vectorize the calculation over all observations
@@ -100,12 +255,26 @@ class ConjugatePosterior():
         return Sigma_n_inv
 
     def _compute_posterior_conjugate(self, x_n, beta, w2, grad_w2):
-        """
-        Computes the posterior mean and covariance for the neural exponential family model.
+        """Posterior mean and covariance in standardised space.
 
-        Returns:
-        - mu_n: (d_theta,) tensor for the posterior mean.
-        - Sigma_n: (d_theta, d_theta) tensor for the posterior covariance.
+        Parameters
+        ----------
+        x_n : torch.Tensor
+            Standardised data of shape ``(n, d_x)``.
+        beta : float
+            Learning rate of the generalised posterior.
+        w2 : torch.Tensor
+            Squared weights, shape ``(n,)``.
+        grad_w2 : torch.Tensor
+            Gradients of the squared weights, shape ``(n, d_x)``.
+
+        Returns
+        -------
+        mu_n : torch.Tensor
+            Posterior mean, shape ``(d_theta,)``, from solving
+            ``Sigma_n^{-1} mu_n = Sigma_0^{-1} mu_0 - 2 * beta * B``.
+        Sigma_n : torch.Tensor
+            Posterior covariance, shape ``(d_theta, d_theta)``.
         """
 
         # 1. Compute the posterior precision matrix
@@ -126,6 +295,21 @@ class ConjugatePosterior():
         return mu_n, Sigma_n
 
     def _compute_A(self,x_n,w2):
+        """Quadratic coefficient ``A = sum_i w2_i J_T(x_i) J_T(x_i)^T``.
+
+        Parameters
+        ----------
+        x_n : torch.Tensor
+            Standardised data of shape ``(n, d_x)``.
+        w2 : torch.Tensor
+            Squared weights, shape ``(n,)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Symmetric positive semi-definite matrix of shape
+            ``(d_theta, d_theta)``.
+        """
 
         # A = sum_i w2_i * J_T(x_i)^T J_T(x_i)   (d_theta, d_theta)
         # single(xi, fn) returns (J_T^T J_T, J_T); only the covariance term is kept.
@@ -136,6 +320,25 @@ class ConjugatePosterior():
         return A 
 
     def _compute_B(self,x_n,w2,grad_w2):
+        """Linear coefficient ``B`` of the summed score-matching loss.
+
+        ``B = sum_i [w2_i J_T(x_i) grad b(x_i) + J_T(x_i) grad_w2_i
+        + w2_i lap T(x_i)]``; see the module docstring.
+
+        Parameters
+        ----------
+        x_n : torch.Tensor
+            Standardised data of shape ``(n, d_x)``.
+        w2 : torch.Tensor
+            Squared weights, shape ``(n,)``.
+        grad_w2 : torch.Tensor
+            Gradients of the squared weights, shape ``(n, d_x)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Vector of shape ``(d_theta,)``.
+        """
 
         # B = sum_i [ w2_i * div_theta log p(x_i | theta)
         #             + grad_x w2(x_i)^T score_x(x_i) ]   (d_theta,)
@@ -162,29 +365,31 @@ class ConjugatePosterior():
     
     def compute_theta_hat_true(self,
         x_obs: torch.Tensor,) -> torch.Tensor:
-        """
-        Compute the NSM-only minimiser theta_hat_true for NSM-Bayes-conj:
-            theta_hat_true = argmin_theta L_NSM(theta; x_obs, phi_hat)
+        """Minimiser of the score-matching loss on the observed data.
 
-        This corresponds to the M-estimator used as the "true" parameter
-        in the Syring & Martin calibration paper.
+        Computes ``theta_hat = argmin_theta L_NSM(theta; x_obs)``, the
+        M-estimator that general posterior calibration (Syring and Martin,
+        2019) treats as the "true" parameter. Because the loss is quadratic,
+        ``theta_hat = -A^{-1} B`` in standardised space.
 
         Parameters
         ----------
         x_obs : torch.Tensor
-            (n, d_x) observed data (already normalized if you use standardizer_x).
-        w2,
-        grad_w2 :
-        mu_hat_obs : torch.Tensor
-            Robust location of the data.
-        Sigma_inv_obs : torch.Tensor
-            Inverse robust covariance of the data.
+            Observed data of shape ``(n, d_x)`` in original units; it is
+            standardised internally.
 
         Returns
         -------
         torch.Tensor
-            ``theta_hat_true`` of shape ``(d_theta,)`` in the same (normalized)
-            theta space that T_phi produces.
+            ``theta_hat`` of shape ``(d_theta,)`` in original ``theta``
+            units.
+
+        Notes
+        -----
+        ``A`` is symmetrised and regularised with a ridge
+        ``lam * I``, ``lam = 1e-2 * trace(A) / d_theta + 1e-12``, before
+        solving. A Cholesky solve is tried first, falling back to least
+        squares if the factorisation fails.
         """
         x_n = self._normalise_input(x_obs)
 

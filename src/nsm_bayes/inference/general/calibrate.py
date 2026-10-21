@@ -1,4 +1,11 @@
-"""Beta calibration (general posterior calibration) for NSM-Bayes."""
+"""Beta calibration for the general (normalising-flow) NSM-Bayes method.
+
+The generalised posterior of
+:class:`~nsm_bayes.models.general.posterior.GeneralPosterior` has no closed
+form, so bootstrap posteriors are approximated by importance-reweighting one
+set of MCMC samples (see :mod:`nsm_bayes.inference.bootstrap`), and the
+samples are refreshed only when the weights degenerate.
+"""
 
 import math
 from collections.abc import Callable
@@ -25,45 +32,73 @@ def calibrate_beta(posterior: GeneralPosterior,
         beta_min: float = 0.01,
         ess_threshold: float = 0.3,
         ) -> tuple[float, dict]:
-    """
-    Calibrate beta via bootstrap coverage matching for NSM-Bayes.
+    """Calibrate ``beta`` for the general posterior by bootstrap coverage matching.
 
     Parameters
     ----------
+    posterior : GeneralPosterior
+        Generalised posterior for the observed data. Supplies the
+        per-observation losses, the point estimate ``theta_hat`` and fresh
+        MCMC samples when the importance weights degenerate.
     theta_samples_base : torch.Tensor
-        Samples drawn at `beta_base` on the original data, shape ``(M, d)``.
+        Samples from `posterior` at `beta_base` on the original data,
+        shape ``(M, d)``.
     beta_base : float
-        Beta value the base samples were drawn at.
+        Value of ``beta`` at which `theta_samples_base` were drawn.
     alpha : float, default 0.05
-        Significance level; ``1 - alpha`` is the target coverage.
+        Miscoverage level; ``1 - alpha`` is the target coverage.
     B : int, default 200
-        Number of bootstraps per iteration.
+        Number of bootstrap resamples per iteration.
     T : int, default 10
-        Number of stochastic approximation iterations.
-    beta_init : float or None, default None
-        Starting beta; falls back to `beta_base` when None.
-    step_schedule : callable, default lambda t: 10.0 / (t + 10)
-        Step size ``k_t`` used for the log-beta update at iteration ``t``.
+        Number of stochastic-approximation iterations.
+    beta_init : float, optional
+        Starting value of ``beta``. Defaults to `beta_base`.
+    step_schedule : callable, default ``lambda t: 10.0 / (t + 10)``
+        Step-size schedule ``k_t`` for the update of ``log(beta)``; called
+        with the zero-based iteration index.
     max_log_step : float, default 0.25
-        Cap on ``k_t * (coverage error)`` per log-beta update.
+        Absolute cap on the per-iteration change in ``log(beta)``.
     beta_min : float, default 0.01
-        Lower bound for beta to prevent collapse.
+        Lower bound on ``beta``, to stop it collapsing towards zero.
     ess_threshold : float, default 0.3
-        ESS-to-M ratio below which samples may be refreshed.
+        If the mean effective sample size of the bootstrap weights falls
+        below ``ess_threshold * M``, new samples are drawn at the current
+        ``beta`` and become the new base.
 
     Returns
     -------
     beta_star : float
-        Final calibrated beta.
+        The calibrated value of ``beta`` after the final iteration.
     history : dict
-        Dictionary with 'betas' and 'coverages' over iterations.
+        ``{"betas": list[float], "coverages": list[float]}``: the value of
+        ``beta`` after each update and the empirical coverage that drove it.
+
+    See Also
+    --------
+    nsm_bayes.inference.conjugate.calibrate_beta.calibrate_beta_gpc :
+        The equivalent routine for the conjugate method.
+
     Notes
     -----
-    - We importance-reweight the original MCMC samples from beta_base to get
-      approximate posteriors at new beta values, for each bootstrap resample.
-    - If weights degenerate (low ESS) and refresh_sampler is provided, we rejuvenate:
-      resample theta at the current beta and rebuild loss cache.
-    - theta_hat (the pseudo-true parameter) stays fixed as the mean at beta_base.
+    ``theta_hat`` is the NSM minimiser on the full data, found by
+    :meth:`GeneralPosterior.compute_theta_hat_true` (200 Adam steps with
+    learning rate ``1e-2``, started from the mean of `theta_samples_base`).
+    It is held fixed throughout. Each iteration then:
+
+    1. draws ``B`` multinomial bootstrap count vectors;
+    2. importance-reweights the base samples from ``beta_base`` on the
+       original data to the current ``beta`` on each resample
+       (:func:`~nsm_bayes.inference.bootstrap.reweight_for_bootstrap_beta`);
+    3. estimates coverage as the fraction of resamples whose weighted
+       ``1 - alpha`` ellipsoid contains ``theta_hat``
+       (:func:`~nsm_bayes.inference.bootstrap.bootstrap_coverage_indicator`);
+    4. updates ``log(beta) += clip(k_t * (coverage - (1 - alpha)),
+       -max_log_step, max_log_step)``, clamped at ``log(beta_min)``;
+    5. if the mean ESS ``1 / sum_m W_bm^2`` is below
+       ``ess_threshold * M``, redraws samples with ``posterior.sample`` at
+       the updated ``beta`` and recomputes the loss cache.
+
+    Progress is printed to stdout.
     """
 
     device = posterior.x_obs.device

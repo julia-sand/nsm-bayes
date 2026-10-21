@@ -26,9 +26,15 @@ def build_problem(cfg: DictConfig) -> tuple:
 
     Returns
     -------
-    tuple
-        ``(sim, prior, theta_true, d_x)`` where ``theta_true`` is the true
-        parameter vector in log space.
+    sim : TurinSimulator
+        Simulator configured from ``B_hz``, ``Ns``, ``device`` and, if
+        present, ``prior_mean`` and ``prior_cov``.
+    prior : torch.distributions.MultivariateNormal
+        Gaussian prior in log space.
+    theta_true : torch.Tensor
+        ``log(cfg.theta_true)``, shape ``(4,)``.
+    d_x : int
+        ``cfg.d_x``.
     """
     dtype = torch.float32
     theta_true = torch.log(torch.tensor(cfg.theta_true, dtype=dtype))
@@ -73,7 +79,8 @@ def generate_data(
     Returns
     -------
     ExperimentData
-        Training data ``(theta, x_sim)`` and observed data; no extras.
+        Training data ``(theta, x_sim)`` and the contaminated observations
+        ``x_obs_mis``; ``x_obs`` is ``None`` and there are no extras.
     """
     theta, x_sim = sim.generate_training_data(cfg.num_samples)
     

@@ -1,9 +1,10 @@
+"""Miscellaneous helpers."""
 import random
 import numpy as np
 import torch
 
 def set_seed(seed: int) -> None:
-    """Seed the random, numpy and torch global RNGs with `seed`.
+    """Seed the ``random``, ``numpy`` and ``torch`` global RNGs.
 
     Parameters
     ----------

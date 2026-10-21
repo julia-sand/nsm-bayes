@@ -42,12 +42,18 @@ implementations for:
 │       │   ├── sir.py
 │       │   ├── sir_undercounting.py
 │       │   └── turin.py
-│       ├── models/         # conjugate and general (normflow) models
-│       ├── simulators/     # simulators and misspecification helpers
-│       ├── gpc.py          # beta calibration (general and GPC)
-│       ├── method.py       # score-matching losses and robust statistics
-│       ├── slice_sampler.py
-│       └── utils/
+│       ├── inference/
+│       │   ├── bootstrap.py        # importance-reweighted bootstrap helpers
+│       │   ├── conjugate/          # GPC beta calibration (conjugate method)
+│       │   └── general/            # beta calibration and slice sampler (normflow method)
+│       ├── models/
+│       │   ├── conjugate/          # exponential-family surrogate, training, closed-form posterior
+│       │   └── general/            # sbi flow wrapper, generalised posterior, MCMC settings
+│       ├── simulators/
+│       │   ├── add_noise.py        # misspecification helpers
+│       │   └── benchmark_simulators/  # g-and-k, SIR and Turin simulators
+│       ├── utils/          # linear algebra, robust statistics, weight functions
+│       └── viz/            # plotting scripts
 ├── tests/
 ├── .gitignore
 ├── pyproject.toml
@@ -81,14 +87,26 @@ python scripts/conjugate/run_sir_undercounting.py robust_flag=true
 python scripts/normflow/run_turin.py density_estimator=maf
 ```
 
-Results are written to `data/<experiment_name>/` under the directory you
-launch from; the Turin experiments additionally use `eps=<epsilon>/de=<density_estimator>`
-subfolders.
+Results are written to `data/<experiment_name>/<method>/` under the directory
+you launch from, where `<method>` is `general` for the `scripts/normflow/` runs
+and `conjugate` for the `scripts/conjugate/` runs; the Turin experiments
+additionally use `eps=<epsilon>/de=<density_estimator>` subfolders.
 
 A new experiment script is a short Hydra entry point that passes one
 experiment module (for example `nsm_bayes.experiments.gnk`) and one method
 step (`run_normflow_methods` or `run_conjugate_method`) to
 `nsm_bayes.experiments.common.run_experiment`.
+
+## API documentation
+
+All modules, classes and functions in `src/nsm_bayes/` carry
+[NumPy-style docstrings](https://numpydoc.readthedocs.io/en/latest/format.html).
+Use `help()` in Python, or check them with numpydoc:
+
+```bash
+python -m pip install numpydoc
+python -m numpydoc lint $(find src/nsm_bayes -name '*.py')
+```
 
 ## Dependencies
 

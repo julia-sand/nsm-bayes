@@ -1,5 +1,7 @@
-"""
-This module provides access to various simulator functions used in the project.
+"""Benchmark simulators used in the experiments.
+
+Re-exports :class:`GandKSimulator` (also available as ``GNKSimulator``),
+:class:`SIRSimulator` and :class:`TurinSimulator`.
 """
 
 from .gandk import GandKSimulator

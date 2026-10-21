@@ -1,23 +1,36 @@
-"""Contains functions for adding outliers and noise to datasets for testing inference"""
+"""Misspecification helpers: outliers, heavy-tailed noise and contamination.
+
+These functions corrupt a fraction ``epsilon`` of a clean observed data set
+so that the robustness of the posteriors can be tested.
+"""
 import torch
 
 from torch.distributions import Binomial, StudentT
 
 
 def add_outliers_by_proportion(data, epsilon, outlier_values):
-    """
-    Randomly replaces a proportion `epsilon` of observations with outliers.
+    """Shift a random fraction of observations by a fixed outlier offset.
 
-    Args:
-        data (torch.Tensor): The original dataset of shape (n_obs, d_x).
-        epsilon (float): The proportion of data to replace (e.g., 0.1 for 10%).
-        outlier_values (list or tuple): A list of values to sample outliers from
-                                        (e.g., [10.0, -10.0]).
+    ``floor(epsilon * n_obs)`` rows are chosen without replacement. For each
+    one, a value is drawn uniformly from `outlier_values` and **added** to
+    every coordinate of the row.
 
-    Returns:
-        tuple: A tuple containing:
-            - modified_data (torch.Tensor): A new tensor with outliers.
-            - outlier_indices (torch.Tensor): A tensor of the indices that were replaced.
+    Parameters
+    ----------
+    data : torch.Tensor
+        Clean data of shape ``(n_obs, d_x)``; not modified.
+    epsilon : float
+        Fraction of rows to corrupt, e.g. ``0.1`` for 10%.
+    outlier_values : sequence of float
+        Offsets to choose from, e.g. ``[10.0, -10.0]``.
+
+    Returns
+    -------
+    modified_data : torch.Tensor
+        Copy of `data` with the selected rows shifted.
+    outlier_indices : torch.Tensor
+        Indices of the shifted rows; an empty float tensor if no row is
+        corrupted (a warning is printed in that case).
     """
     modified_data = data.clone()
     
@@ -54,28 +67,42 @@ def add_student_t_noise(
     use_robust_scale: bool = False,
     eps: float = 1e-8,
 ):
-    """
-    Add Student-t heavy-tailed noise to an epsilon fraction of samples.
+    """Add Student-t noise to a random fraction of the observations.
 
-    Args
-    ----
-    x_obs : [n_obs, d]
-        Observed summary statistics.
-    epsilon : float in [0, 1]
-        Fraction of samples to corrupt.
-    df : float
-        Degrees of freedom (df=1 -> Cauchy).
-    noise_scale : float
-        Multiplier on the estimated scale.
-    use_robust_scale : bool
-        If True, use MAD instead of std for scaling.
-    
+    Parameters
+    ----------
+    x_obs : torch.Tensor
+        Observed data of shape ``(n_obs, d)``; not modified.
+    epsilon : float
+        Fraction in ``[0, 1]`` of rows to corrupt; ``floor(epsilon * n_obs)``
+        rows are chosen without replacement.
+    df : float, default 3.0
+        Degrees of freedom of the noise (``df=1`` gives Cauchy noise).
+    noise_scale : float, default 1.0
+        Multiplier on the per-dimension scale estimate.
+    use_robust_scale : bool, default False
+        Scale the noise by ``1.4826 * MAD`` instead of the (biased) standard
+        deviation of each dimension.
+    eps : float, default 1e-8
+        Added to the scale estimate.
+
     Returns
     -------
-    x_noisy : [n_obs, d]
-        Observed data with sparse heavy-tailed corruption.
-    corrupted_indices : LongTensor
-        Indices of samples that were corrupted.
+    x_noisy : torch.Tensor or tuple
+        Copy of `x_obs` with the selected rows perturbed, shape
+        ``(n_obs, d)``. If no row is selected the function instead returns
+        the tuple ``(x_noisy, corrupted_indices)`` with an empty index
+        tensor (see Notes).
+
+    Raises
+    ------
+    AssertionError
+        If `x_obs` is not 2-D or `epsilon` is outside ``[0, 1]``.
+
+    Notes
+    -----
+    The return type is inconsistent: a single tensor when noise is added,
+    a 2-tuple when ``floor(epsilon * n_obs) == 0``.
     """
     assert x_obs.dim() == 2
     assert 0.0 <= epsilon <= 1.0
@@ -124,36 +151,46 @@ def simulate_contaminated_dataset(
     contaminant="prior",
     prior=None,
 ):
-    """
-    Generate a dataset where a fraction epsilon of the samples are contaminated.
+    """Simulate a data set in which a random fraction uses other parameters.
 
-    Args
-    ----
-    theta_true : Tensor [d]
-        True parameter vector.
+    Each of the `n_obs` samples is independently marked as contaminated
+    with probability `epsilon`. Clean samples are simulated at
+    `theta_true`; contaminated ones at parameters drawn from `prior`.
+
+    Parameters
+    ----------
+    theta_true : torch.Tensor
+        True parameter vector of shape ``(d,)``.
     n_obs : int
-        Number of observed samples.
+        Number of samples.
     simulate_fn : callable
-        Function to simulate data given theta, T, N.
+        Called as ``simulate_fn(theta, T=T, N=N)`` with ``theta`` of shape
+        ``(n_obs, d)``.
     T : int
-        Simulation time.
+        Time horizon passed to `simulate_fn`.
     N : int
-        Population size.
+        Population size passed to `simulate_fn`.
     epsilon : float
-        Fraction of contaminated samples.
-    contaminant : str
-        Type of contamination ("prior" or "fixed").
-    prior : Distribution
-        Prior distribution for contamination if contaminant="prior".
+        Probability that a sample is contaminated.
+    contaminant : str, default "prior"
+        ``"prior"`` draws contaminating parameters from `prior`. Any other
+        value (or ``prior=None``) uses the fixed offset ``theta_true + 1``.
+    prior : torch.distributions.Distribution, optional
+        Distribution of the contaminating parameters.
 
     Returns
     -------
-    y_obs_mis : Tensor
-        Simulated data (potentially contaminated).
-    is_contam : Tensor [n_obs]
-        Boolean mask of contaminated samples.
-    theta_used : Tensor [n_obs, d]
-        Parameters used for each sample.
+    y_obs_mis : torch.Tensor
+        Output of `simulate_fn` for all samples.
+    is_contam : torch.Tensor
+        Boolean mask of shape ``(n_obs,)``.
+    theta_used : torch.Tensor
+        Parameters used for each sample, shape ``(n_obs, d)``.
+
+    See Also
+    --------
+    nsm_bayes.simulators.benchmark_simulators.sir.SIRSimulator.generate_contaminated_data :
+        Method version used by the SIR experiment.
     """
     device = theta_true.device
     dtype = theta_true.dtype
@@ -188,11 +225,36 @@ def apply_undercounting_trajectory(
     q: float = 0.3,            # retention probability (one-sided: downward)
     per_time: bool = False,    # if True: contaminate per time point, else per trajectory
 ):
-    """
-    One-sided undercounting by binomial thinning.
-    Returns: y_corrupted, is_contam_mask
-      - if per_time=False: is_contam_mask is (n_obs,) for contaminated trajectories
-      - if per_time=True:  is_contam_mask is (n_obs, T) for contaminated time points
+    """Undercount counts by binomial thinning (one-sided misspecification).
+
+    Each selected count ``y`` is replaced by a draw from
+    ``Binomial(y, q)``, so counts can only decrease.
+
+    Parameters
+    ----------
+    y : torch.Tensor
+        Integer-valued counts of shape ``(n_obs, T)``.
+    epsilon : float, default 0.05
+        Probability that a trajectory (or a single time point, see
+        `per_time`) is thinned.
+    q : float, default 0.3
+        Retention probability of each counted case.
+    per_time : bool, default False
+        If false, whole trajectories are selected; if true, individual time
+        points are.
+
+    Returns
+    -------
+    y_corrupted : torch.Tensor
+        Thinned copy of `y` with the same dtype.
+    is_contam : torch.Tensor
+        Boolean mask of shape ``(n_obs,)`` (trajectories) or
+        ``(n_obs, T)`` (time points).
+
+    See Also
+    --------
+    nsm_bayes.simulators.benchmark_simulators.sir.SIRSimulator.apply_undercounting_trajectory :
+        Method version used by the experiments.
     """
     assert y.dim() == 2
     n_obs, T = y.shape

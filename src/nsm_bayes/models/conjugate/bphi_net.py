@@ -1,16 +1,26 @@
+"""Network for the base-measure term ``b_phi(x)`` of the conjugate surrogate."""
 import torch
 from torch import nn
 
 
 class BphiNet(nn.Module):
-    """Network to approximate the b_phi mapping.
+    """Scalar network ``b_phi: R^{d_x} -> R``.
+
+    In the conjugate surrogate likelihood
+    ``log q(x | theta) = theta^T T_phi(x) + b_phi(x)`` this network is the
+    log base measure. It is a one-hidden-layer MLP with ``tanh``
+    activation, Xavier-uniform weights and biases initialised to ``0.01``.
 
     Parameters
     ----------
     input_dim : int
-        Dimension of x (D_X).
+        Data dimension ``d_x``.
     hidden_dim : int
-        Size of the hidden layers.
+        Width of the hidden layer.
+
+    See Also
+    --------
+    TphiNet : The sufficient-statistic network.
     """
 
     def __init__(self, input_dim: int, hidden_dim: int):
@@ -23,6 +33,7 @@ class BphiNet(nn.Module):
         self._initialize_weights()
 
     def _initialize_weights(self):
+        """Xavier-uniform weights and constant ``0.01`` biases."""
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.xavier_uniform_(module.weight)
@@ -30,4 +41,17 @@ class BphiNet(nn.Module):
                     module.bias.data.fill_(0.01)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Evaluate ``b_phi``.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Data of shape ``(..., d_x)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Values of shape ``(...)`` (the trailing unit dimension is
+            squeezed).
+        """
         return self.network(x).squeeze(-1)

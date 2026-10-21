@@ -28,9 +28,17 @@ def build_problem(cfg: DictConfig) -> tuple:
 
     Returns
     -------
-    tuple
-        ``(sim, prior, theta_true, d_x)`` with ``theta_true`` in the
-        unconstrained (log/logit) parameter space.
+    sim : SIRSimulator
+        Simulator with the configured prior, ``T_sir``, ``N_sir`` and
+        observation model (default ``"poisson"``).
+    prior : torch.distributions.MultivariateNormal
+        Gaussian prior in the unconstrained space. ``cfg.prior_mean`` is
+        given in the constrained space and transformed; ``cfg.prior_std``
+        is used as is.
+    theta_true : torch.Tensor
+        True parameter vector in the unconstrained space, shape ``(4,)``.
+    d_x : int
+        ``cfg.d_x``.
     """
     dtype = torch.float32
   
@@ -86,8 +94,15 @@ def generate_data(
     Returns
     -------
     ExperimentData
-        Training data ``(theta, x_sim)`` and observed data; the extras
-        hold the contamination mask ``is_contam``.
+        Summary statistics for training (``x_sim``), clean observations
+        (``x_obs``) and contaminated observations (``x_obs_mis``); the
+        extras hold the clean trajectories ``y_obs`` and the contamination
+        mask ``is_contam``.
+
+    Notes
+    -----
+    ``x_obs_mis`` is a separate simulation, not a corrupted copy of
+    ``x_obs``.
     """
 
     #training data for surrogate density 

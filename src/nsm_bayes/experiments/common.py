@@ -75,14 +75,55 @@ MethodStep = Callable[[ExperimentData, Any, DictConfig, Path, int], None]
 
 
 def save(save_dir: Path, name: str, rep: int, obj: Any) -> None:
-    """Pickle ``obj`` to ``save_dir / f"{name}_{rep}.pkl"``."""
+    """Pickle an object for one repetition.
+
+    Parameters
+    ----------
+    save_dir : pathlib.Path
+        Output directory; must exist.
+    name : str
+        Artifact name.
+    rep : int
+        Repetition index.
+    obj : object
+        Any picklable object.
+
+    Notes
+    -----
+    Writes ``save_dir / f"{name}_{rep}.pkl"``, overwriting any existing
+    file.
+    """
     with open(save_dir / f"{name}_{rep}.pkl", "wb") as fh:
         pickle.dump(obj, fh)
 
 
 @contextmanager
 def timed(save_dir: Path, name: str, rep: int) -> Generator[None]:
-    """Time a block and save the elapsed seconds as ``cost_{name}_{rep}.pkl``."""
+    """Context manager that saves the wall-clock time of its block.
+
+    Parameters
+    ----------
+    save_dir : pathlib.Path
+        Output directory.
+    name : str
+        Label; the time is saved as ``cost_{name}_{rep}.pkl``.
+    rep : int
+        Repetition index.
+
+    Yields
+    ------
+    None
+
+    Notes
+    -----
+    The elapsed seconds (``time.perf_counter``) are saved even if the block
+    raises.
+
+    Examples
+    --------
+    >>> with timed(save_dir, "nle_training", rep):  # doctest: +SKIP
+    ...     model.fit(theta, x_sim)
+    """
     start = time.perf_counter()
     try:
         yield
@@ -101,12 +142,55 @@ def run_normflow_methods(
 
     Trains the flow on the simulation data, samples the baseline NLE
     posterior, calibrates ``beta`` and finally samples the calibrated
-    general posterior.  If ``likelihood_estimator_full_{rep}.pt`` already
-    exists in ``save_dir``, the flow is loaded from it and training (and
-    ``cost_nle_training``) is skipped.  Saves ``likelihood_estimator_full``,
-    ``cost_nle_training``, ``samples_nle_mis``, ``cost_nle_mcmc``,
-    ``samples_sm``, ``cost_sm_mcmc``, ``beta``, ``gpc_history``,
-    ``posterior_mean`` and ``posterior_covariance`` for this repetition.
+    generalised posterior.
+
+    Parameters
+    ----------
+    data : ExperimentData
+        Data for this repetition; the method uses ``theta``, ``x_sim`` and
+        ``x_obs_mis``.
+    prior : torch.distributions.MultivariateNormal
+        Prior over ``theta`` (``float32``, as sbi requires).
+    cfg : omegaconf.DictConfig
+        Experiment configuration. Reads ``num_posterior_samples``,
+        ``num_chains``, ``warmup_steps``, ``thin``, ``robust_flag``,
+        ``beta_base_general``, ``alpha``, ``B``, ``T`` and, optionally,
+        ``density_estimator`` (default ``"maf"``) and ``beta_min_general``
+        (default ``0.01``).
+    save_dir : pathlib.Path
+        Output directory.
+    rep : int
+        Repetition index.
+
+    See Also
+    --------
+    run_conjugate_method : The conjugate method step.
+
+    Notes
+    -----
+    If ``likelihood_estimator_full_{rep}.pt`` already exists in `save_dir`,
+    the flow is loaded from it and training is skipped (so no
+    ``cost_nle_training`` is written).
+
+    Files written for repetition ``rep`` (``.pkl`` unless noted):
+
+    ==============================  ========================================
+    ``likelihood_estimator_full``   trained flow (``.pt``)
+    ``cost_nle_training``           flow training time, seconds
+    ``samples_nle_mis``             NLE posterior samples
+    ``cost_nle_mcmc``               NLE sampling time
+    ``samples_sm``                  calibrated generalised posterior samples
+    ``cost_sm_mcmc``                time for base sampling, calibration and
+                                    final sampling
+    ``gpc_history``                 calibration history
+    ``beta``                        calibrated ``beta``
+    ``posterior_mean``              mean of ``samples_sm``
+    ``posterior_covariance``        covariance of ``samples_sm``
+    ==============================  ========================================
+
+    The posterior moments use the same estimator as the weights (median and
+    MCD when ``robust_flag`` is set) and are only written if more than one
+    sample was drawn.
     """
     x_obs_mis = data.x_obs_mis
 
@@ -175,11 +259,46 @@ def run_conjugate_method(
 
     Fits a :class:`~nsm_bayes.models.conjugate.conj_model.ConjugateModel`
     on the simulation data, calibrates ``beta`` with GPC and computes the
-    calibrated posterior.  If ``conjugate_nets_{rep}.pt`` already exists in
-    ``save_dir``, the model is loaded from it and training (and
-    ``cost_sm_train``) is skipped.  Saves ``conjugate_nets``,
-    ``cost_sm_train``, ``posterior_mean``, ``posterior_covariance``,
-    ``gpc_history``, ``beta`` and ``cost_sm_posterior`` for this repetition.
+    calibrated Gaussian posterior, using IMQ weights.
+
+    Parameters
+    ----------
+    data : ExperimentData
+        Data for this repetition; the method uses ``theta``, ``x_sim`` and
+        ``x_obs_mis``.
+    prior : torch.distributions.MultivariateNormal
+        Gaussian prior; its ``loc`` and ``covariance_matrix`` are used.
+    cfg : omegaconf.DictConfig
+        Experiment configuration. Reads ``d_x``, ``hidden_dim``,
+        ``robust_flag``, ``beta_base_case1``, ``alpha``, ``T``, ``B`` and,
+        optionally, ``beta_min_case1`` (default ``0.01``).
+    save_dir : pathlib.Path
+        Output directory.
+    rep : int
+        Repetition index.
+
+    See Also
+    --------
+    run_normflow_methods : The normalising-flow method step.
+
+    Notes
+    -----
+    The model is moved to the device and dtype of ``data.x_obs_mis``. If
+    ``conjugate_nets_{rep}.pt`` already exists in `save_dir`, the model is
+    loaded from it and training is skipped (so no ``cost_sm_train`` is
+    written).
+
+    Files written for repetition ``rep`` (``.pkl`` unless noted):
+
+    ==========================  ============================================
+    ``conjugate_nets``          trained networks and standardisers (``.pt``)
+    ``cost_sm_train``           training time, seconds
+    ``cost_sm_posterior``       calibration and posterior time
+    ``posterior_mean``          calibrated posterior mean
+    ``posterior_covariance``    calibrated posterior covariance
+    ``gpc_history``             calibration history
+    ``beta``                    calibrated ``beta``
+    ==========================  ============================================
     """
     x_obs_mis = data.x_obs_mis
     d_theta = data.theta.shape[1]
@@ -240,9 +359,10 @@ def run_experiment(
 ) -> None:
     """Run one experiment: loop over repetitions and drive the method step.
 
-    For each repetition the RNGs are seeded, all data (training and
-    observed) is generated and saved first, and only then is `method_step`
-    called, so both variants of an experiment get the same data.
+    For each repetition ``rep`` the RNGs are seeded with
+    ``cfg.seed_offset + rep``, all data (training and observed) is
+    generated and saved first, and only then is `method_step` called, so
+    both method variants of an experiment get the same data.
 
     Parameters
     ----------
@@ -256,7 +376,24 @@ def run_experiment(
         ``(data, prior, cfg, save_dir, rep) -> None``; the method variant
         for this script.
     save_dir : pathlib.Path
-        Directory the data and method artifacts are written to.
+        Directory the data and method artifacts are written to; created if
+        missing.
+
+    Notes
+    -----
+    Besides the files written by `method_step`, each repetition saves
+    ``theta``, ``x_sim``, ``x_obs_mis``, ``x_obs`` (if not ``None``) and
+    every entry of ``data.extras`` as ``{name}_{rep}.pkl``.
+
+    Examples
+    --------
+    A Hydra entry point is a few lines:
+
+    >>> from nsm_bayes.experiments import gnk  # doctest: +SKIP
+    >>> from nsm_bayes.experiments.common import (  # doctest: +SKIP
+    ...     run_conjugate_method, run_experiment)
+    >>> run_experiment(cfg, gnk, run_conjugate_method,  # doctest: +SKIP
+    ...                Path("data/gnk"))
     """
     save_dir.mkdir(parents=True, exist_ok=True)
     sim, prior, theta_true, d_x = problem_module.build_problem(cfg)

@@ -1,4 +1,4 @@
-"""g-and-k experiment: problem setup and data generation.
+"""The g-and-k experiment: problem setup and data generation.
 
 The misspecification is additive outliers: a fraction ``epsilon`` of the
 observed values is replaced by values from ``cfg.outlier_values``.
@@ -10,7 +10,6 @@ from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments.common import ExperimentData
-from nsm_bayes.simulators.add_noise import add_outliers_by_proportion
 from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
 
 __all__ = ["build_problem", "generate_data"]
@@ -26,10 +25,14 @@ def build_problem(cfg: DictConfig) -> tuple:
 
     Returns
     -------
-    tuple
-        ``(sim, prior, theta_true, d_x)`` where ``prior`` is the Gaussian
-        prior in the reparameterised space and ``theta_true`` is the true
-        parameter vector in the same space.
+    sim : GandKSimulator
+        Simulator with the configured prior.
+    prior : torch.distributions.MultivariateNormal
+        Gaussian prior on ``[A, log(B), g, log(k)]``.
+    theta_true : torch.Tensor
+        True parameter vector in the same space, shape ``(4,)``.
+    d_x : int
+        Data dimension, always ``1``.
     """
     dtype = torch.float32
     prior_mean = torch.tensor(cfg.prior_mean, dtype=dtype)
@@ -69,13 +72,9 @@ def generate_data(
         Training data ``(theta, x_sim)`` and observed data; the extras
         hold ``outlier_indices``.
     """
-    #theta = prior.sample((cfg.num_samples,))
-    #x_sim = sim.simulate(theta).unsqueeze(-1)
-    theta,x_sim = sim.generate_training_data(cfg.num_samples)
-    
-    x_obs = sim.simulate(theta_true, n=cfg.n_obs).unsqueeze(-1)
-    x_obs_mis, outlier_indices = add_outliers_by_proportion(
-        x_obs, cfg.epsilon, cfg.outlier_values
+    theta, x_sim = sim.generate_training_data(cfg.num_samples)
+    x_obs, x_obs_mis, outlier_indices = sim.generate_contaminated_data(
+        theta_true, cfg.n_obs, cfg.epsilon, cfg.outlier_values
     )
 
     return ExperimentData(

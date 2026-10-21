@@ -1,5 +1,11 @@
-"""
-This module contains the Turin channel model simulator class.
+"""Turin model of a radio propagation channel.
+
+Multipath components arrive as a homogeneous Poisson process with rate
+``lambda_0`` over the observation window. Their complex gains are Gaussian
+with variance decaying exponentially in the delay (reverberation time
+``T``, gain ``G0``), and complex white Gaussian noise of variance
+``sigma2_N`` is added to the frequency response. Parameters are handled in
+log space: ``theta = log([G0, T, lambda_0, sigma2_N])``.
 """
 
 from __future__ import annotations
@@ -12,9 +18,32 @@ EPS = 1e-12
 class TurinSimulator:
     """Simulator for the Turin channel model.
 
-    This class provides methods to simulate the stochastic Turin channel
-    model, compute the temporal moment summaries of the received time-domain
-    response, and generate synthetic training and observation datasets.
+    Simulates received frequency responses, summarises them by log temporal
+    moments, and generates training and observed data sets.
+
+    Parameters
+    ----------
+    B : float, default 4e9
+        Bandwidth in Hz.
+    Ns : int, default 801
+        Number of frequency samples.
+    N : int, default 50
+        Default number of receivers simulated for a 1-D `theta`.
+    tau0 : float, default 0.0
+        Multipath components with delay below `tau0` (seconds) get zero
+        gain.
+    device : str, default "cpu"
+        Device for the simulation (``"cpu"`` or ``"cuda"``).
+    prior_mean : torch.Tensor, optional
+        Prior mean in log space, shape ``(4,)``. Defaults to
+        ``[-19, -19, 22, -22]``.
+    prior_cov : torch.Tensor, optional
+        Prior covariance, shape ``(4, 4)``. Defaults to the identity.
+
+    Attributes
+    ----------
+    prior : torch.distributions.MultivariateNormal
+        Prior over the log parameters.
     """
 
     def __init__(
@@ -27,26 +56,6 @@ class TurinSimulator:
         prior_mean: torch.Tensor | None = None,
         prior_cov: torch.Tensor | None = None,
     ) -> None:
-        """Initialize the Turin channel model simulator.
-
-        Parameters
-        ----------
-        B : float, default 4e9
-            Bandwidth in Hz.
-        Ns : int, default 801
-            Number of frequency samples.
-        N : int, default 50
-            Number of time series (receivers) drawn per call to
-            :meth:`simulate` when no explicit `N` is given.
-        tau0 : float, default 0.0
-            Minimum delay threshold in seconds.
-        device : str, default "cpu"
-            Device to use ("cpu" or "cuda").
-        prior_mean : torch.Tensor, optional
-            Prior mean vector. If None, uses default values.
-        prior_cov : torch.Tensor, optional
-            Prior covariance matrix. If None, uses default values.
-        """
         self.B = B
         self.Ns = Ns
         self.N = N
@@ -70,21 +79,24 @@ class TurinSimulator:
     def _simulate_channel(
         self, theta: torch.Tensor, epsilon: float = 0.0
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Simulate the complex channel frequency response with AWGN.
+        """Simulate the received complex frequency response.
 
         Parameters
         ----------
         theta : torch.Tensor
-            Parameter vector [G0, T, lambda_0, sigma2_N] in log space.
+            Log parameters ``[G0, T, lambda_0, sigma2_N]``: shape ``(4,)``
+            (shared by ``self.N`` receivers) or ``(nRx, 4)`` (one row per
+            receiver).
         epsilon : float, default 0.0
-            Fraction (0-1) of outlier receivers to replace with pure noise.
+            Fraction of receivers, ``int(epsilon * nRx)``, whose channel is
+            set to zero so they receive noise only.
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor]
-            (Y, outlier_indices), where Y is the received frequency response
-            of shape (self.N, Ns) and outlier_indices indexes the receivers
-            that received noise only.
+        Y : torch.Tensor
+            Complex frequency response of shape ``(nRx, Ns)``.
+        outlier_indices : torch.Tensor
+            Indices of the noise-only receivers (empty if none).
         """
         # batch support: theta (d_theta,) broadcasts to all nRx receivers,
         # theta (nRx, d_theta) gives each receiver its own parameters
@@ -152,19 +164,23 @@ class TurinSimulator:
     def temporal_moments(
         self, Y: torch.Tensor, K: int = 3
     ) -> torch.Tensor:
-        """Compute log temporal moment summaries of a received response.
+        """Log temporal moments of the received power delay profile.
+
+        For each receiver the time-domain response ``y = ifft(Y)`` is formed
+        and the moments ``m_k = integral tau^k |y(tau)|^2 dtau`` for
+        ``k = 0, ..., K - 1`` are computed with the trapezoidal rule.
 
         Parameters
         ----------
         Y : torch.Tensor
-            Received frequency response of shape (N, Ns), complex.
+            Complex frequency response of shape ``(n, Ns)``.
         K : int, default 3
-            Number of temporal moments to compute.
+            Number of moments.
 
         Returns
         -------
         torch.Tensor
-            Log temporal moments of shape (N, K), float32.
+            ``log(m_k)`` as ``float32``, shape ``(n, K)``.
         """
         delta_f = self.B / (self.Ns - 1)
         t_max = 1 / delta_f
@@ -185,32 +201,44 @@ class TurinSimulator:
         T: int | None = None,
         **kwargs,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Simulate the Turin channel model and summarize the response.
+        """Simulate receivers and return summaries or the raw power profile.
 
         Parameters
         ----------
         theta : torch.Tensor
-            Parameter vector [G0, T, lambda_0, sigma2_N] in log space,
-            either 1D (broadcast to all receivers) or 2D of shape
-            (n_theta, d_theta) to give each receiver its own parameters.
+            Log parameters ``[G0, T, lambda_0, sigma2_N]``: shape ``(4,)``
+            (shared by all receivers) or ``(n_theta, 4)`` (one row per
+            receiver).
         T : int, optional
-            Time horizon. For the Turin simulator, this is ignored as the
-            number of samples is governed by `Ns`.
+            Ignored; accepted for interface compatibility.
         **kwargs
-            Additional simulation arguments. Supported:
-            - N : int, optional. Number of receivers. If None, uses `self.N`
-              or `theta.shape[0]` if theta is 2D.
-            - Ns : int, optional. Number of frequency samples. Defaults to `self.Ns`.
-            - output : str, default "moments". "moments" to return 3D log
-              moment summaries, "data" for the full time-domain power (dB).
-            - epsilon : float, default 0.0. Fraction (0-1) of outlier time
-              series to replace with pure noise.
+            Optional keyword arguments:
+
+            ``N`` : int
+                Number of receivers to return. Defaults to
+                ``theta.shape[0]`` for 2-D `theta`, else ``self.N``. Extra
+                simulated receivers are discarded.
+            ``Ns`` : int
+                Must equal ``self.Ns`` if given.
+            ``output`` : {"moments", "data"}, default "moments"
+                What to return (see Returns).
+            ``epsilon`` : float, default 0.0
+                Fraction of noise-only receivers, as in
+                :meth:`_simulate_channel`.
 
         Returns
         -------
         torch.Tensor or tuple
-            If output == "moments", returns temporal moments of shape
-            (N, K). If output == "data", returns (p_dB, outlier_indices, tau).
+            For ``output="moments"``, the log temporal moments of shape
+            ``(N, 3)``. For ``output="data"``, a tuple
+            ``(p_dB, outlier_indices, tau)`` on the CPU: received power in dB
+            ``(N, Ns)``, the noise-only receiver indices, and the delay grid
+            ``(Ns,)``.
+
+        Raises
+        ------
+        ValueError
+            If ``Ns`` differs from ``self.Ns`` or ``output`` is unknown.
         """
         N = kwargs.get("N")
         Ns = kwargs.get("Ns")
@@ -252,19 +280,20 @@ class TurinSimulator:
         self,
         n: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Generate training data by sampling from the prior.
+        """Simulate training pairs with parameters drawn from the prior.
 
         Parameters
         ----------
         n : int
-            Number of training samples; the simulator draws one batch of
-            `n` receivers, each with its own theta.
+            Number of pairs; one receiver is simulated per prior draw, in a
+            single batched call.
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor]
-            Tuple of (theta, x_sim), where theta is (n, d_theta) and
-            x_sim is (n, K) log temporal moments.
+        theta : torch.Tensor
+            Log-parameter draws of shape ``(n, 4)``.
+        x_sim : torch.Tensor
+            Log temporal moments of shape ``(n, 3)``.
         """
         theta = self.prior.sample((n,))
         # One batch draw: `n` receivers, each with its own theta, in a
@@ -278,21 +307,22 @@ class TurinSimulator:
         n_obs: int,
         epsilon: float = 0.0,
     ) -> torch.Tensor:
-        """Generate observed data with potential outliers.
+        """Simulate observed data with prior-contaminated receivers.
 
         Parameters
         ----------
         theta : torch.Tensor
-            True parameter vector in log space.
+            True log parameters, shape ``(4,)``.
         n_obs : int
-            Number of receivers to simulate.
+            Number of receivers.
         epsilon : float, default 0.0
-            Fraction of receivers to replace with pure noise.
+            Fraction of receivers, ``floor(epsilon * n_obs)``, replaced by
+            receivers simulated at parameters drawn from the prior.
 
         Returns
         -------
         torch.Tensor
-            Simulated observed data (moments) of shape (n_obs, K).
+            Log temporal moments of shape ``(n_obs, 3)``.
         """
         # Draw theta for each receiver (identical to theta_true)
         theta_batch = theta.expand(n_obs, -1)

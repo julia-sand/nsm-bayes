@@ -1,4 +1,12 @@
-"""Beta calibration (general posterior calibration) for NSM-Bayes."""
+"""Beta calibration for the conjugate NSM-Bayes method.
+
+Implements general posterior calibration (GPC; Syring and Martin, 2019) for
+the closed-form Gaussian posterior of
+:class:`~nsm_bayes.models.conjugate.conj_posterior.ConjugatePosterior`.
+Because the posterior is available analytically, every bootstrap resample is
+evaluated exactly; no importance reweighting is needed (compare
+:func:`nsm_bayes.inference.general.calibrate.calibrate_beta`).
+"""
 
 import math
 from collections.abc import Callable
@@ -23,45 +31,77 @@ def calibrate_beta_gpc(
     max_log_step: float = 0.25,
     beta_min: float = 0.01,
 ) -> tuple[float, dict]:
-    """Calibrate ``beta`` using the General Posterior Calibration (GPC).
+    """Calibrate ``beta`` for the conjugate posterior by GPC.
+
+    ``beta`` is tuned so that the ``target_coverage`` credible ellipsoid of
+    the calibrated posterior covers the point estimate ``theta_hat`` with
+    the same frequency across bootstrap resamples of `x_obs`.
 
     Parameters
     ----------
     x_obs : torch.Tensor
-        Observed data of shape ``(n, d_x)`` in the original (unnormalised)
-        feature scale.
+        Observed data of shape ``(n, d_x)`` in the original (unstandardised)
+        scale.
     posterior : ConjugatePosterior
-        A configured ``ConjugatePosterior`` holding the trained
-        ``ConjugateModel`` and the prior. Used to evaluate the posterior
-        for any bootstrap resample.
+        Posterior wrapping the trained
+        :class:`~nsm_bayes.models.conjugate.conj_model.ConjugateModel` and
+        the prior; evaluated on every bootstrap resample.
     initial_beta : float, default 0.1
-        Starting value for ``beta``.
+        Starting value of ``beta``.
     target_coverage : float, default 0.95
-        Desired frequentist coverage of the beta-credible region.
+        Desired frequentist coverage of the credible region.
     num_iterations : int, default 50
         Number of stochastic-approximation iterations.
     num_bootstraps : int, default 200
-        Number of bootstrap resamples used per iteration to estimate the
+        Number of bootstrap resamples per iteration used to estimate the
         empirical coverage.
     learning_rate_fn : callable, default ``lambda t: 10 / (t + 10)``
-        Step-size schedule ``k_t`` for the log-beta update.
+        Step-size schedule ``k_t`` for the update of ``log(beta)``; called
+        with the zero-based iteration index.
     max_log_step : float, default 0.25
-        Absolute cap on ``k_t * (coverage error)`` per iteration.
+        Absolute cap on the per-iteration change in ``log(beta)``.
     beta_min : float, default 0.01
-        Lower bound on ``beta`` to avoid collapse.
+        Lower bound on ``beta``, to stop it collapsing towards zero.
 
     Returns
     -------
-    float
-        The calibrated value of ``beta``.
-    dict
-        History with keys ``"betas"`` and ``"coverages"``.
+    beta : float
+        The calibrated value of ``beta`` after the final iteration.
+    history : dict
+        ``{"betas": list[float], "coverages": list[float]}``: the value of
+        ``beta`` after each update and the empirical coverage that drove it.
+
+    See Also
+    --------
+    nsm_bayes.inference.general.calibrate.calibrate_beta :
+        The equivalent routine for the general (normalising-flow) method.
 
     Notes
     -----
-    All data is handled in the original scale: ``ConjugatePosterior``
-    normalises internally and returns the posterior in original units, so
-    the bootstrap resample and ``theta_hat_true`` live on the same scale.
+    Each iteration proceeds as follows:
+
+    1. Draw ``num_bootstraps`` resamples of the rows of `x_obs` with
+       replacement and compute the posterior ``N(mu_b, Sigma_b)`` for each
+       at the current ``beta``.
+    2. Count how often ``theta_hat`` falls inside the ellipsoid
+       ``(theta - mu_b)^T Sigma_b^{-1} (theta - mu_b) <= chi2_{d}(target)``,
+       where ``d = d_theta``. This gives the empirical coverage ``c_t``.
+    3. Update ``log(beta) += clip(k_t * (c_t - target_coverage),
+       -max_log_step, max_log_step)`` and clamp at ``log(beta_min)``.
+
+    Over-coverage therefore increases ``beta`` (sharper posterior) and
+    under-coverage decreases it.  ``theta_hat`` is
+    :meth:`ConjugatePosterior.compute_theta_hat_true` on the full data and
+    is held fixed throughout.
+
+    All quantities are in the original scale: ``ConjugatePosterior``
+    standardises internally and returns its moments in original units.
+    Progress is printed to stdout.
+
+    References
+    ----------
+    .. [1] N. Syring and R. Martin, "Calibrating general posterior credible
+       regions", *Biometrika*, 106(2), 479-486, 2019.
     """
     print("--- Starting General Posterior Calibration for beta ---")
 

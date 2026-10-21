@@ -1,4 +1,16 @@
-"""Multivariate slice sampler with adaptive width tuning for NSM-Bayes."""
+"""Multivariate slice sampler with adaptive width tuning for NSM-Bayes.
+
+Each step picks a uniformly random direction on the unit sphere and performs
+one univariate slice-sampling update (Neal, 2003) along that line, using the
+stepping-out and shrinkage procedures.  During warm-up the initial bracket
+width is adapted towards the widths of the final brackets with an
+exponential moving average.
+
+References
+----------
+.. [1] R. M. Neal, "Slice sampling", *The Annals of Statistics*, 31(3),
+   705-767, 2003.
+"""
 import numpy as np
 from joblib import Parallel, delayed
 
@@ -11,8 +23,45 @@ def run_multivariate_slice_sampler_tuned(
     n_jobs=1,
     seed=None,
 ):
-    """
-    Parallel multivariate slice sampler with adaptive width tuning.
+    """Run several random-direction slice-sampling chains.
+
+    Parameters
+    ----------
+    log_posterior_fn : callable
+        Maps a parameter vector (``numpy.ndarray`` of shape ``(d,)``) to its
+        unnormalised log-posterior as a float. May return ``-inf`` outside
+        the support; must not return NaN.
+    prior : torch.distributions.Distribution
+        Used only to draw one initial state per chain.
+    mcmcsettings : MCMCSettings
+        Number of chains, retained samples, warm-up steps and thinning.
+    initial_w : float, default 1.0
+        Initial bracket width for the univariate slice steps.
+    n_jobs : int, default 1
+        Number of joblib workers (threads) that run chains in parallel.
+    seed : int, optional
+        If given, seeds NumPy's global RNG before sampling. The initial
+        states are drawn with torch's RNG and are not affected.
+
+    Returns
+    -------
+    numpy.ndarray
+        Post-warm-up samples from all chains stacked along the first axis,
+        shape ``(num_chains * S, d)``.
+
+    Raises
+    ------
+    FloatingPointError
+        If `log_posterior_fn` returns NaN, or a non-finite value at a
+        chain's current state.
+
+    Notes
+    -----
+    Each chain runs ``(warmup_steps + num_samples) * thin`` steps. The chain
+    is thinned by ``thin`` and the first ``warmup_steps // thin`` thinned
+    states are discarded, so each chain contributes
+    ``S = warmup_steps + num_samples - warmup_steps // thin`` samples. This
+    equals ``num_samples`` only when ``thin == 1``.
     """
     if seed is not None:
         np.random.seed(seed)
@@ -48,7 +97,30 @@ def run_multivariate_slice_sampler_tuned(
     return final_samples
 
 def log_posterior_wrapper(a,theta_current,direction,log_posterior_fn):
-    
+    """Evaluate the log-posterior along a line through the current state.
+
+    Parameters
+    ----------
+    a : float
+        Offset along `direction`.
+    theta_current : numpy.ndarray
+        Current state of shape ``(d,)``.
+    direction : numpy.ndarray
+        Unit direction of shape ``(d,)``.
+    log_posterior_fn : callable
+        Log-posterior on the full parameter space.
+
+    Returns
+    -------
+    float
+        ``log_posterior_fn(theta_current + a * direction)``.
+
+    Raises
+    ------
+    FloatingPointError
+        If the log-posterior is NaN at that point.
+    """
+
     v = float(log_posterior_fn(theta_current + a * direction))
     if np.isnan(v):
         raise FloatingPointError(f"log-posterior is NaN at offset a={a}")
@@ -65,8 +137,38 @@ def _run_single_chain_multivariate_tuned(
     initial_w,
     max_step_out=1000,
 ):
-    """
-    Runs one MCMC chain with adaptive width tuning.
+    """Run one random-direction slice-sampling chain.
+
+    Parameters
+    ----------
+    chain_id : int
+        Index used only in progress messages.
+    log_posterior_fn : callable
+        Log-posterior on the full parameter space.
+    initial_theta : numpy.ndarray
+        Starting state of shape ``(d,)``; copied, not modified.
+    total_steps : int
+        Total number of steps, warm-up included.
+    warmup_steps : int
+        Number of initial steps during which the bracket width is adapted.
+    initial_w : float
+        Initial bracket width.
+    max_step_out : int, default 1000
+        Maximum number of stepping-out expansions on each side of the
+        bracket; the shrinkage phase may take up to ``10 * max_step_out``
+        proposals.
+
+    Returns
+    -------
+    numpy.ndarray
+        Every state of the chain (no thinning or warm-up removal), shape
+        ``(total_steps, d)``.
+
+    Notes
+    -----
+    During warm-up the width is updated as
+    ``w <- 0.95 * w + 0.05 * final_bracket_width`` after every step and is
+    then frozen.
     """
     d_theta = len(initial_theta)
     theta_current = initial_theta.copy()
@@ -104,8 +206,34 @@ def _run_single_chain_multivariate_tuned(
 
 
 def _slice_sampler_1d_adaptive(log_p_1d, current_val, w=1.0, max_step_out=1000):
-    """
-    1-D slice sampling step with adaptive width return.
+    """Perform one univariate slice-sampling step.
+
+    Parameters
+    ----------
+    log_p_1d : callable
+        Unnormalised log-density of a scalar argument.
+    current_val : float
+        Current position.
+    w : float, default 1.0
+        Initial bracket width, placed uniformly at random around
+        `current_val`.
+    max_step_out : int, default 1000
+        Maximum number of stepping-out expansions on each side.
+
+    Returns
+    -------
+    new_val : float
+        The accepted position, or `current_val` if no proposal was accepted
+        within ``10 * max_step_out`` shrinkage proposals (a warning is
+        printed in that case).
+    bracket_width : float
+        Width of the bracket from which `new_val` was accepted, used for
+        width adaptation; `w` on fallback.
+
+    Raises
+    ------
+    FloatingPointError
+        If the log-density at `current_val` is not finite.
     """
 
     log_p_current = log_p_1d(current_val)

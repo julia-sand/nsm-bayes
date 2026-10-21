@@ -1,5 +1,9 @@
-"""
-This module contains the SIR simulator class for generating epidemiological data.
+"""Stochastic discrete-time SIR epidemic simulator.
+
+Parameters are handled in the unconstrained space
+``(log beta, log gamma, logit rho, log I0[, log phi])``: infection rate,
+recovery rate, reporting probability, initial number infected and, for the
+negative-binomial observation model, overdispersion.
 """
 
 from __future__ import annotations
@@ -10,27 +14,52 @@ from torch.distributions import Binomial, MultivariateNormal, NegativeBinomial, 
 # Small constants that only guard against division by zero / clamp bounds.
 
 class SIRSimulator:
-    """Simulator for the SIR epidemiological model.
+    """Simulator for the stochastic SIR epidemic model.
 
-    This class provides methods to simulate the stochastic SIR model, transform
-    parameters between constrained and unconstrained spaces, and generate
-    synthetic datasets for training and observation.
+    Simulates reported daily incidence in a closed population, transforms
+    parameters between constrained and unconstrained spaces, computes
+    summary statistics and generates (contaminated) data sets.
+
+    Parameters
+    ----------
+    obs_model : {"poisson", "negbin"}, default "poisson"
+        Observation model for reported cases. ``"negbin"`` takes effect only
+        for 5-dimensional parameters (which include ``log phi``); with 4
+        parameters observations are always Poisson.
+    dt : float, default 1.0
+        Length of one time step.
+    prior_mean : torch.Tensor, optional
+        Prior mean in the unconstrained space, shape ``(4,)``. Defaults to
+        ``[0.5, 0.2, 0.5, 20.0]``.
+    prior_cov : torch.Tensor, optional
+        Prior covariance, shape ``(4, 4)``. Defaults to
+        ``diag([0.5, 0.5, 1.0, 0.7] ** 2)``.
+    T : int, default 150
+        Number of time steps per trajectory.
+    N : int, default 1000
+        Population size.
+
+    Attributes
+    ----------
+    prior : torch.distributions.MultivariateNormal
+        Prior over the unconstrained parameters.
 
     Methods
     -------
     to_unconstrained
-        Transform constrained parameters to unconstrained space.
+        Map constrained parameters to the unconstrained space.
     to_constrained
-        Transform unconstrained parameters to constrained space.
+        Map unconstrained parameters to the constrained space.
     simulate
-        Simulate a stochastic discrete-time SIR process.
+        Simulate incidence trajectories.
     summary
-        Compute summary statistics for SIR incidence.
+        Compute summary statistics of trajectories.
     generate_training_data
-        Generate training data by sampling from the prior.
-    generate_observed_data
-        Generate observed data with a mixture of clean and contaminated
-        samples.
+        Simulate trajectories at prior draws.
+    generate_contaminated_data
+        Simulate observed data with prior-contaminated trajectories.
+    apply_undercounting_trajectory
+        Undercount trajectories by binomial thinning.
     """
 
     def __init__(
@@ -42,19 +71,6 @@ class SIRSimulator:
         T=150,
         N=1000,
     ) -> None:
-        """Initialize the SIR simulator.
-
-        Parameters
-        ----------
-        obs_model : str, default "poisson"
-            Observation model: "poisson" or "negbin".
-        dt : float, default 1.0
-            Time step for the simulation.
-        prior_mean : torch.Tensor, optional
-            Prior mean vector. If None, uses default values.
-        prior_cov : torch.Tensor, optional
-            Prior covariance matrix. If None, uses default values.
-        """
         self.obs_model = obs_model
         self.dt = dt
 
@@ -78,19 +94,20 @@ class SIRSimulator:
 
 
     def to_unconstrained(self, vals: torch.Tensor) -> torch.Tensor:
-        """Transform constrained parameters to unconstrained space.
+        """Map constrained parameters to the unconstrained space.
 
-        Transforms (beta, gamma, rho, I0, [phi]) -> (log_beta, log_gamma, logit_rho, log_I0, [log_phi]).
+        ``(beta, gamma, rho, I0[, phi]) -> (log beta, log gamma, logit rho,
+        log I0[, log phi])``.
 
         Parameters
         ----------
         vals : torch.Tensor
-            Constrained parameters of shape (n, d).
+            Constrained parameters of shape ``(n, d)`` with ``d`` 4 or 5.
 
         Returns
         -------
         torch.Tensor
-            Unconstrained parameters of shape (n, d).
+            Unconstrained parameters of shape ``(n, d)``.
         """
         n, d = vals.shape
         unconstrained = torch.empty_like(vals)
@@ -103,19 +120,22 @@ class SIRSimulator:
         return unconstrained
 
     def to_constrained(self, theta: torch.Tensor) -> torch.Tensor:
-        """Transform unconstrained parameters to constrained space.
+        """Map unconstrained parameters to the constrained space.
 
-        Transforms (log_beta, log_gamma, logit_rho, log_I0, [log_phi]) -> (beta, gamma, rho, I0, [phi]).
+        ``(log beta, log gamma, logit rho, log I0[, log phi]) -> (beta,
+        gamma, rho, I0[, phi])``. ``I0`` is rounded to an integer and
+        clamped to at least 1, so this is not an exact inverse of
+        :meth:`to_unconstrained`.
 
         Parameters
         ----------
         theta : torch.Tensor
-            Unconstrained parameters of shape (n, d).
+            Unconstrained parameters of shape ``(n, d)`` with ``d`` 4 or 5.
 
         Returns
         -------
         torch.Tensor
-            Constrained parameters of shape (n, d).
+            Constrained parameters of shape ``(n, d)``.
         """
         n, d = theta.shape
         constrained = torch.empty_like(theta)
@@ -132,21 +152,33 @@ class SIRSimulator:
         theta: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        """Stochastic discrete-time SIR with Binomial transitions.
+        """Simulate reported incidence with binomial transitions.
+
+        At each step, new infections are ``Binomial(S, 1 - exp(-beta I / N
+        dt))`` and recoveries ``Binomial(I, 1 - exp(-gamma dt))``. Reported
+        cases are ``Poisson(rho * new_infections)`` or, for 5-dimensional
+        parameters with ``obs_model="negbin"``, negative binomial with mean
+        ``rho * new_infections`` and dispersion ``phi``.
 
         Parameters
         ----------
         theta : torch.Tensor
-            Parameter tensor of shape (n, d_theta) in unconstrained space.
-            If d_theta == 4: (log_beta, log_gamma, logit_rho, log_I0).
-            If d_theta == 5: add log_phi for NegBin overdispersion.
-        **kwargs : dict
-            Additional arguments (ignored).
+            Unconstrained parameters of shape ``(n, d)``:
+            ``(log beta, log gamma, logit rho, log I0)`` for ``d == 4``, plus
+            ``log phi`` for ``d == 5``.
+        **kwargs
+            Ignored.
 
         Returns
         -------
         torch.Tensor
-            Simulated trajectories of shape (n, T).
+            Reported incidence of shape ``(n, T)``, with the dtype and device
+            of `theta`.
+
+        Raises
+        ------
+        AssertionError
+            If `theta` is not 2-D.
         """
         assert theta.dim() == 2
         n, d = theta.shape
@@ -207,22 +239,29 @@ class SIRSimulator:
         return y
 
     def summary(self, y: torch.Tensor, N: float | None = None) -> torch.Tensor:
-        """Compute summary statistics for SIR incidence.
+        """Summarise incidence trajectories.
 
         Parameters
         ----------
         y : torch.Tensor
-            Incidence data of shape (n, T).
+            Incidence of shape ``(n, T)``.
+        N : float, optional
+            Unused; the simulator's population size ``self.N`` is always
+            used.
 
         Returns
         -------
         torch.Tensor
-            Summary statistics of shape (n, 3): [attack_rate, t_peak_scaled, peak_scaled].
+            ``float32`` summaries of shape ``(n, 3)``:
+
+            * attack rate, ``sum_t y_t / N``;
+            * time of the peak, ``argmax_t y_t / (T - 1)``;
+            * peak height, ``max_t y_t / N``.
 
         Raises
         ------
         ValueError
-            If `y` is already summarized (i.e., has 3 columns).
+            If `y` has 3 columns, i.e. appears to be summarised already.
         """
         y = y.to(torch.float32)
 
@@ -240,20 +279,20 @@ class SIRSimulator:
         return torch.stack([attack, t_peak, peak], dim=1)
 
     def generate_training_data(self,n ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Generate training data by sampling from the prior.
+        """Simulate trajectories at parameters drawn from the prior.
 
         Parameters
         ----------
-        prior : MultivariateNormal
-            Prior distribution for unconstrained parameters.
         n : int
-            Number of samples.
+            Number of trajectories.
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-            Tuple of (theta, observed_data, summary_stats), where theta is
-            (n, d), observed_data is (n, T) and summary_stats is (n, 3).
+        theta : torch.Tensor
+            Unconstrained prior draws of shape ``(n, d)``.
+        y : torch.Tensor
+            Raw incidence of shape ``(n, T)``; apply :meth:`summary` to get
+            the training features.
         """
         theta = self.prior.sample((n,))
         y = self.simulate(theta)
@@ -268,22 +307,30 @@ class SIRSimulator:
         epsilon: float,
         contaminant="prior",
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Generate observed data with theta true, and 
-        add a fraction epsilon of different thetas
+        """Simulate observed data in which some trajectories use prior draws.
+
+        Each of the `n_obs` trajectories is independently contaminated with
+        probability `epsilon`; contaminated trajectories are simulated at a
+        parameter drawn from the prior, the rest at `theta_true`.
 
         Parameters
         ----------
         theta_true : torch.Tensor
-            True unconstrained parameters of shape (1, d).
+            True unconstrained parameters, shape ``(d,)``.
         n_obs : int
-            Total number of observed samples.
+            Number of trajectories.
         epsilon : float
-            Fraction of contaminated samples.
+            Contamination probability per trajectory.
+        contaminant : str, default "prior"
+            ``"prior"`` draws contaminating parameters from the prior; any
+            other value uses the fixed offset ``theta_true + 1``.
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor]
-            Tuple of (observations, contamination index, thetas used for simulations).
+        y : torch.Tensor
+            Incidence of shape ``(n_obs, T)``.
+        is_contam : torch.Tensor
+            Boolean mask of shape ``(n_obs,)``.
         """
 
         device = theta_true.device
@@ -320,15 +367,30 @@ class SIRSimulator:
         q: float = 0.3,            # retention probability (one-sided: downward)
         per_time: bool = False,    # if True: contaminate per time point, else per trajectory
     ):
-        """
-        One-sided undercounting by binomial thinning.
-        applies the thinning to clean data, given by yobs.
-        Returns: y_corrupted, is_contam_mask
-        - if per_time=False: is_contam_mask is (n_obs,) for contaminated trajectories
-        - if per_time=True:  is_contam_mask is (n_obs, T) for contaminated time points
-        
-        theta_true: torch.Tensor,
+        """Undercount clean trajectories by binomial thinning.
 
+        Each selected count ``y`` is replaced by a draw from
+        ``Binomial(y, q)``, so counts can only decrease.
+
+        Parameters
+        ----------
+        y_obs : torch.Tensor
+            Clean incidence of shape ``(n_obs, T)``; not modified.
+        epsilon : float
+            Probability that a trajectory (or a time point, see
+            `per_time`) is thinned.
+        q : float, default 0.3
+            Retention probability of each reported case.
+        per_time : bool, default False
+            If false, whole trajectories are selected; if true, individual
+            time points are.
+
+        Returns
+        -------
+        y_corrupted : torch.Tensor
+            Thinned copy of `y_obs` with the same dtype.
+        is_contam : torch.Tensor
+            Boolean mask of shape ``(n_obs,)`` or ``(n_obs, T)``.
         """
       
         y_cor = y_obs.clone()

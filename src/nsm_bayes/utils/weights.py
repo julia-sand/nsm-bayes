@@ -1,8 +1,15 @@
 """Robust weighting functions for neural score-matching Bayes.
 
-All public functions accept data of shape ``(d_x,)`` (single
-observation) or ``(n, d_x)`` (batch of observations) and return
-matching output shapes.
+The weighted score-matching loss uses a weight ``w(x)`` that decays for
+observations far from the bulk of the data, measured by the Mahalanobis
+distance ``r(x)^2 = (x - mu_hat)^T Sigma_inv (x - mu_hat)``. Every function
+returns the *squared* weight ``w2 = w(x)^2`` together with its gradient
+``grad_w2`` with respect to ``x``.
+
+All public functions accept data of shape ``(n, d_x)`` and return ``w2``
+of shape ``(n,)`` and ``grad_w2`` of shape ``(n, d_x)``. A single
+observation of shape ``(d_x,)`` is treated as a batch of one, so the
+outputs have shapes ``(1,)`` and ``(1, d_x)``.
 """
 
 import torch
@@ -16,18 +23,47 @@ __all__ = [
 
 
 def _squeeze(x, w2, grad_w2):
-    """Squeeze batched outputs back to row shape if the input was 1-D."""
+    """Squeeze batched outputs back to single-row shape.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Data after :func:`_as_batch`; always 2-D in practice, so the
+        outputs are returned unchanged.
+    w2, grad_w2 : torch.Tensor
+        Batched outputs.
+
+    Returns
+    -------
+    w2, grad_w2 : torch.Tensor
+        The outputs, squeezed along the first axis if `x` is 1-D.
+    """
     if x.ndim == 1:
         return w2.squeeze(0), grad_w2.squeeze(0)
     return w2, grad_w2
 
 def _as_batch(x):
-    """Promote a (d_x,) row to (1, d_x)."""
+    """Promote a single observation to a batch of one.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Data of shape ``(d_x,)`` or ``(n, d_x)``.
+
+    Returns
+    -------
+    torch.Tensor
+        ``(1, d_x)`` for 1-D input, otherwise `x` unchanged.
+    """
     return x.unsqueeze(0) if x.ndim == 1 else x
 
 
 def imq_weight(x, mu_hat, Sigma_inv, c=1, zeta=1):
-    """Compute the squared inverse-multiquadric weight ``w_IMQ(x)^2``.
+    r"""Squared inverse-multiquadric (IMQ) weight and its gradient.
+
+    .. math::
+
+        w^2(x) = \left(1 + r(x)^2 / c\right)^{-2/\zeta}
 
     Parameters
     ----------
@@ -44,10 +80,15 @@ def imq_weight(x, mu_hat, Sigma_inv, c=1, zeta=1):
 
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        ``w2`` of shape ``(n,)`` (scalar for a ``(d_x,)`` input) and
-        the analytic gradient ``grad_w2`` of shape ``(n, d_x)``
-        (``(d_x,)`` for a row input).
+    w2 : torch.Tensor
+        Squared weights of shape ``(n,)``.
+    grad_w2 : torch.Tensor
+        Analytic gradient of `w2` with respect to `x`, shape ``(n, d_x)``.
+
+    Notes
+    -----
+    A single observation of shape ``(d_x,)`` is promoted to ``(1, d_x)``
+    and the outputs keep that leading axis (``(1,)`` and ``(1, d_x)``).
     """
     x = _as_batch(x)
 
@@ -67,32 +108,34 @@ def imq_weight(x, mu_hat, Sigma_inv, c=1, zeta=1):
 
 
 def unweighted(x, *args, **kwargs):
-    """Constant weight ``w(x) = 1`` (``w2 = 1``, ``grad_w2 = 0``).
+    """Constant weight ``w(x) = 1``, giving the standard score-matching loss.
 
     Parameters
     ----------
     x : torch.Tensor
         Data of shape ``(d_x,)`` or ``(n, d_x)``.
-    *args, **kwargs : any
-        Additional arguments (ignored).
+    *args, **kwargs
+        Ignored; accepted so all weight functions share one signature.
 
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        ``w2`` and ``grad_w2`` matching the shape convention of ``x``.
+    w2 : torch.Tensor
+        Ones of shape ``(n,)`` (``(1,)`` for a single observation).
+    grad_w2 : torch.Tensor
+        Zeros of shape ``(n, d_x)`` (``(1, d_x)`` for a single
+        observation).
     """
     x = _as_batch(x)
     return torch.ones(x.shape[:-1], dtype=x.dtype, device=x.device), torch.zeros_like(x)
 
 
 def huber_weight(x, mu_hat, Sigma_inv, c=1.0, eps=1e-12):
-    """Compute the squared Huber-type weight.
+    """Squared Huber-type weight and its gradient.
 
-        w(x)    = min(1, c / r),            r = ||x - mu||_{Sigma_inv}
-        w2      = 1                         if r <= c
-                  c^2 / r^2                 otherwise
-        grad_w2 = 0                         if r <= c
-                  -2 c^2 Sigma_inv (x - mu) / r^4   otherwise
+    The weight is ``w(x) = min(1, c / r(x))``, so
+
+    * ``w2 = 1`` and ``grad_w2 = 0`` if ``r <= c``;
+    * ``w2 = c^2 / r^2`` otherwise.
 
     Parameters
     ----------
@@ -103,13 +146,26 @@ def huber_weight(x, mu_hat, Sigma_inv, c=1.0, eps=1e-12):
     Sigma_inv : torch.Tensor
         Inverse robust covariance of shape ``(d_x, d_x)``.
     c : float, default 1.0
-        Huber scale.
-    c : float, default 1e-12
-        small regularisation to prevent errors near 0.
+        Radius (in Mahalanobis units) beyond which observations are
+        down-weighted.
+    eps : float, default 1e-12
+        Currently unused.
+
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        ``w2`` and ``grad_w2`` matching the shape convention of ``x``.
+    w2 : torch.Tensor
+        Squared weights of shape ``(n,)`` (``(1,)`` for a single
+        observation).
+    grad_w2 : torch.Tensor
+        Gradient term of shape ``(n, d_x)`` (``(1, d_x)`` for a single
+        observation); see Notes.
+
+    Notes
+    -----
+    Outside the radius the returned gradient is
+    ``-2 c^2 Sigma_inv (x - mu_hat) / r^2``. The analytic gradient of
+    ``c^2 / r^2`` is ``-2 c^2 Sigma_inv (x - mu_hat) / r^4``, so the two
+    differ by a factor ``r^2``.
     """
     x = _as_batch(x)
 
@@ -131,22 +187,30 @@ def huber_weight(x, mu_hat, Sigma_inv, c=1.0, eps=1e-12):
 
 
 def weight_function(name, x, *args, **kwargs):
-    """Dispatch to a named weight function.
+    """Evaluate a weight function selected by name.
 
     Parameters
     ----------
-    name : str
-        Name of the weight function ('imq', 'huber', 'none').
+    name : {"imq", "huber", "none"}
+        Weight function (case-insensitive): :func:`imq_weight`,
+        :func:`huber_weight` or :func:`unweighted`.
     x : torch.Tensor
         Data of shape ``(d_x,)`` or ``(n, d_x)``.
-    *args, **kwargs : any
-        Additional arguments (``mu_hat``, ``Sigma_inv``, ``c``, ...)
-        passed to the weight function.
+    *args, **kwargs
+        Passed on to the weight function, typically ``mu_hat``,
+        ``Sigma_inv`` and optionally ``c``.
 
     Returns
     -------
-    tuple[torch.Tensor, torch.Tensor]
-        ``(w2, grad_w2)`` matching the shape convention of ``x``.
+    w2 : torch.Tensor
+        Squared weights.
+    grad_w2 : torch.Tensor
+        Gradients of the squared weights with respect to `x`.
+
+    Raises
+    ------
+    ValueError
+        If `name` is not a known weight function.
     """
     WEIGHT_FUNCTIONS = {
         "imq": imq_weight,

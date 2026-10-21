@@ -25,3 +25,10 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 nsm_bayes = ["config/*.yaml"]
+
+[tool.numpydoc_validation]
+# `python -m numpydoc lint $(find src/nsm_bayes -name '*.py')` checks the
+# docstrings. Skipped checks are stylistic: extended summary, See Also and
+# Examples are optional, and returns may be named.
+checks = ["all", "ES01", "SA01", "EX01", "RT02", "SS05", "PR02", "YD01"]
+exclude = ['\.__init__$']

@@ -27,9 +27,14 @@ def build_problem(cfg: DictConfig) -> tuple:
 
     Returns
     -------
-    tuple
-        ``(sim, prior, theta_true, d_x)`` as returned by
-        :func:`nsm_bayes.experiments.sir.build_problem`.
+    sim : SIRSimulator
+        See :func:`nsm_bayes.experiments.sir.build_problem`.
+    prior : torch.distributions.MultivariateNormal
+        Gaussian prior in the unconstrained space.
+    theta_true : torch.Tensor
+        True parameter vector in the unconstrained space.
+    d_x : int
+        ``cfg.d_x``.
     """
     return sir.build_problem(cfg)
 
@@ -59,9 +64,15 @@ def generate_data(
     Returns
     -------
     ExperimentData
-        Training data ``(theta, x_sim)`` and the corrupted observed data;
-        the extras hold the clean trajectories ``y_obs`` and the
-        contamination mask ``is_contam``.
+        Summary statistics for training (``x_sim``), clean observations
+        (``x_obs``) and their undercounted version (``x_obs_mis``); the
+        extras hold the clean trajectories ``y_obs`` and the contamination
+        mask ``is_contam``.
+
+    Notes
+    -----
+    Unlike the contamination experiment, ``x_obs_mis`` is derived from the
+    same trajectories as ``x_obs``.
     """
     
     #training data for surrogate density 

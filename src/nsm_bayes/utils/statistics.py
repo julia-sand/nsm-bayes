@@ -13,21 +13,22 @@ def mahalanobis_sq(
     mu: torch.Tensor,
     Sigma: torch.Tensor,
 ) -> torch.Tensor:
-    """Squared Mahalanobis distances for a batch of points.
+    """Squared Mahalanobis distances ``(theta - mu)^T Sigma^{-1} (theta - mu)``.
 
     Parameters
     ----------
     theta : torch.Tensor
-        Points of shape ``(M, d)``.
+        Points of shape ``(M, d)``, or a single point of shape ``(d,)``.
     mu : torch.Tensor
         Mean of shape ``(d,)``.
     Sigma : torch.Tensor
-        Covariance of shape ``(d, d)``.
+        Covariance of shape ``(d, d)``; inverted with
+        :func:`~nsm_bayes.utils.linalg.sigma_inverse`.
 
     Returns
     -------
     torch.Tensor
-        Tensor of shape ``(M,)`` with the squared distance for each point.
+        Distances of shape ``(M,)``, or a scalar for a single point.
     """
     Sigma_inv = sigma_inverse(Sigma)
     diff = theta - mu
@@ -36,14 +37,27 @@ def mahalanobis_sq(
 
 #######----Function to compute robust mean and covariance ----######
 def robust_mean_cov(x_obs):
-    """
-    Computes component-wise median and robust Minimum Covariance Determinant estimator.
-    
-    Inputs:
-    - x_obs: (n, d_x) torch tensor
-    Returns:
-    - mu_hat: (d_x,) torch tensor (robust mean)
-    - Sigma_hat: (d_x, d_x) torch tensor (robust covariance)
+    """Robust location and scatter of the observed data.
+
+    Parameters
+    ----------
+    x_obs : torch.Tensor
+        Data of shape ``(n, d_x)``.
+
+    Returns
+    -------
+    mu_hat : torch.Tensor
+        Component-wise median, shape ``(d_x,)``.
+    Sigma_hat : torch.Tensor
+        Minimum covariance determinant (MCD) estimate from
+        :class:`sklearn.covariance.MinCovDet`, shape ``(d_x, d_x)``, on the
+        dtype and device of `x_obs`. Falls back to the sample covariance if
+        the MCD estimate contains NaNs.
+
+    Notes
+    -----
+    The location is the median, not the MCD location. The MCD fit runs in
+    NumPy on the CPU.
     """
     x_np = x_obs.detach().cpu().numpy()
     
@@ -62,15 +76,24 @@ def robust_mean_cov(x_obs):
 
 
 def sample_mean_and_covariance(x_obs: torch.Tensor):
-    """
-    Compute the sample mean and (unbiased) sample covariance of x_obs.
+    """Sample mean and unbiased sample covariance.
 
-    Args:
-        x_obs (Tensor): shape (n, d)
+    Parameters
+    ----------
+    x_obs : torch.Tensor
+        Data of shape ``(n, d)``.
 
-    Returns:
-        mean (Tensor): shape (d,)
-        cov  (Tensor): shape (d, d)
+    Returns
+    -------
+    mean : torch.Tensor
+        Sample mean, shape ``(d,)``.
+    cov : torch.Tensor
+        Sample covariance with divisor ``n - 1``, shape ``(d, d)``.
+
+    Raises
+    ------
+    ValueError
+        If `x_obs` is not two-dimensional.
     """
     if x_obs.ndim != 2:
         raise ValueError("x_obs must have shape (n, d)")
@@ -89,13 +112,23 @@ def sample_mean_and_covariance(x_obs: torch.Tensor):
     return mean, cov
 
 def estimate_stats(x_obs: torch.Tensor, robust: bool):
-    """Return ``(mu_hat, Sigma_inv)`` for the observed data.
+    """Location and inverse scatter of the data, for the weight functions.
 
-    Mirrors the statistics used by the general-method posterior: robust
-    (median / MCD) estimates when `robust` is true, plain sample moments
-    otherwise, with the covariance inverted by :func:`sigma_inverse`.
+    Parameters
+    ----------
+    x_obs : torch.Tensor
+        Data of shape ``(n, d_x)``.
+    robust : bool
+        If true, use :func:`robust_mean_cov` (median and MCD); otherwise
+        :func:`sample_mean_and_covariance`.
 
-    Returns mean and inverse covariance
+    Returns
+    -------
+    mu_hat : torch.Tensor
+        Location, shape ``(d_x,)``.
+    Sigma_inv : torch.Tensor
+        Inverse scatter from :func:`~nsm_bayes.utils.linalg.sigma_inverse`,
+        shape ``(d_x, d_x)``.
     """
     if robust:
         mu_hat, Sigma_hat = robust_mean_cov(x_obs)
