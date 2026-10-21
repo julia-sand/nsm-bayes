@@ -61,7 +61,7 @@ class GandKSimulator:
                 dtype=torch.float32,
             )
         self.prior = MultivariateNormal(loc=self.prior_mean, 
-                                            covariance_matrix=prior_cov)
+                                            covariance_matrix=self.prior_cov)
     
     def simulate(
         self,

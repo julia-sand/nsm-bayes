@@ -58,7 +58,7 @@ def test_gnk_nle_saved(gnk_run):
 def test_gnk_case1_posterior(gnk_run, gnk_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
-        gnk_run, d_theta=4, beta_min=float(gnk_cfg.get("beta_min_case1", 0.0))
+        gnk_run, d_theta=4, beta_min=float(gnk_cfg.get("beta_min_general", 0.0))
     )
 
 

@@ -50,7 +50,7 @@ def test_sir_uc_undercounting_is_one_sided(sir_uc_cfg, sir_uc_run):
 def test_sir_uc_case1_posterior(sir_uc_run, sir_uc_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
-        sir_uc_run, d_theta=4, beta_min=float(sir_uc_cfg.get("beta_min_case1", 0.0))
+        sir_uc_run, d_theta=4, beta_min=float(sir_uc_cfg.get("beta_min_general", 0.0))
     )
 
 

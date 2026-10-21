@@ -60,7 +60,7 @@ def test_turin_model_changes_with_seed():
 def test_turin_case1_posterior(turin_run, turin_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
-        turin_run, d_theta=4, beta_min=float(turin_cfg.get("beta_min_case1", 0.0))
+        turin_run, d_theta=4, beta_min=float(turin_cfg.get("beta_min_general", 0.0))
     )
 
 

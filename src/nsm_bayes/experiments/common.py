@@ -111,11 +111,11 @@ def run_normflow_methods(
     #set mcmc config
     mcmc = MCMCSettings.from_cfg(cfg)
 
-    flow = GeneralModel(prior, mcmc_settings=mcmc, density_estimator=cfg.get("density_estimator", "maf"))
+    flow_model = GeneralModel(prior, mcmc_settings=mcmc, density_estimator=cfg.get("density_estimator", "maf"))
 
     #train the surrogate model
     with timed(save_dir, "nle_training", rep):
-        flow.fit(
+        flow_model.fit(
             data.theta,
             data.x_sim,
         )
@@ -123,7 +123,7 @@ def run_normflow_methods(
 
     #sample the baseline posterior
     with timed(save_dir, "nle_mcmc", rep):
-        samples_nle_mis = flow.sample_nle_posterior(
+        samples_nle_mis = flow_model.sample_nle_posterior(
             x_obs_mis,
         )
 
@@ -131,7 +131,7 @@ def run_normflow_methods(
 
     #estimate the robust statistics
     #set up a posterior for calibration
-    beta_posterior = GeneralPosterior(flow=flow.estimator, x_obs=x_obs_mis, prior=prior,
+    beta_posterior = GeneralPosterior(flow=flow_model, x_obs=x_obs_mis, prior=prior,
                                 mcmc=mcmc, robust=cfg.robust_flag)
     
     #calibrate beta / temperature
@@ -147,16 +147,16 @@ def run_normflow_methods(
 
     save(save_dir, "samples_sm_general", rep, samples_sm_general)
     save(save_dir, "gpc_history_general", rep, history)
-    save(save_dir, "beta_general", rep, beta)
+    save(save_dir, "beta_min_general", rep, beta)
     # Save Case-1 named artifacts (used by regression tests)
-    save(save_dir, "gpc_history_case1", rep, history)
-    save(save_dir, "beta_case1", rep, beta)
+    #save(save_dir, "gpc_history_case1", rep, history)
+    #save(save_dir, "beta_case1", rep, beta)
 
     # save the posterior moments of the calibrated general samples
     if samples_sm_general.ndim == 2 and samples_sm_general.shape[0] > 1:
         mu_hat, Sigma_hat = estimate_stats(samples_sm_general, cfg.robust_flag)
-        save(save_dir, "posterior_mean_case1", rep, mu_hat)
-        save(save_dir, "posterior_covariance_case1", rep, Sigma_hat)
+        save(save_dir, "posterior_mean_general", rep, mu_hat)
+        save(save_dir, "posterior_covariance_general", rep, Sigma_hat)
 
 
 def run_conjugate_method(

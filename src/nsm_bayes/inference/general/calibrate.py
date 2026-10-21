@@ -12,15 +12,6 @@ from nsm_bayes.inference.bootstrap import (
 )
 from nsm_bayes.models.general.posterior import GeneralPosterior
 
-EPS = 1e-12
-
-#posterior = GeneralPosterior(x_obs,
-#                                flow,
-#                                prior,
-#                                robust=True,
-#                                weight_type="imq")
-
-
 
 def calibrate_beta(posterior: GeneralPosterior,
         theta_samples_base: torch.Tensor,   # (M, d) samples drawn at beta_base on original data

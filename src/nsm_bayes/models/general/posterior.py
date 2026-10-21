@@ -11,7 +11,6 @@ from torch.func import vmap
 
 from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.models.general.mcmc_settings import MCMCSettings
-from nsm_bayes.models.general.normflow import nle_log_prob_safe
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.weights import weight_function
@@ -27,14 +26,14 @@ class GeneralPosterior:
     """
 
     def __init__(self, x_obs,
-                    flow,  #trained density estimate
+                    flow_model,  
                     prior,
                     mcmc: MCMCSettings | None = None,
                     robust: bool = True,
                     weight_type: str = "imq",
                     c: float = 1.0):
 
-        self.flow = flow
+        self.flow = flow_model
         self.x_obs = x_obs
         self.prior = prior
         self.mcmc = mcmc if mcmc is not None else MCMCSettings()
@@ -65,11 +64,12 @@ class GeneralPosterior:
         torch.Tensor
             Scalar score-matching loss contribution for this observation.
         """
-        def log_q(x_obs):
-            return nle_log_prob_safe(self.flow, theta, x_obs=x_obs)
-        score, lap = jacobian_and_laplacian(xi, log_q)  # (d_x,), scalar
+
+        log_q_lambda = lambda xi : self.flow.estimator.log_prob(theta,xi).reshape(1) #self.log_q(xi,theta) 
+        score, lap = jacobian_and_laplacian(xi, log_q_lambda)  # (d_x,), scalar
         return w2_i * (score @ score) + 2.0 * (grad_w2_i @ score) + 2.0 * w2_i * lap
 
+    
     def _losses_one_theta(self, theta):
         """(n,) per-observation losses at one `theta`; differentiable in `theta`."""
         return vmap(self._per_x_sm_loss, in_dims=(0, 0, 0, None))(
@@ -91,8 +91,8 @@ class GeneralPosterior:
         ell = vmap(lambda th: self._losses_one_theta(th))(theta_samples)
         return ell, ell.mean(dim=1)
 
-    @torch.no_grad()
-    def log_prob(self, theta_np: np.ndarray, beta: float) -> float:
+    #@torch.no_grad()
+    def posterior_log_prob(self, theta_np: np.ndarray, beta: float) -> float:
         """log π(θ) − β·n·L_NSM(θ); -inf outside the prior's support. For the slice sampler."""
         theta = torch.as_tensor(theta_np, dtype=self.x_obs.dtype, device=self.x_obs.device)
         lp = self.prior.log_prob(theta).sum()
@@ -103,7 +103,7 @@ class GeneralPosterior:
     def sample(self, beta: float) -> Tensor:
         """Draw posterior samples at `beta` with the slice sampler."""
         samples = run_multivariate_slice_sampler_tuned(
-                            log_posterior_fn=functools.partial(self.log_prob, beta=beta),
+                            log_posterior_fn=functools.partial(self.posterior_log_prob, beta=beta),
                             prior=self.prior,
                             mcmcsettings=self.mcmc
                         )
