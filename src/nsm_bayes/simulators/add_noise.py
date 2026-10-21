@@ -69,9 +69,7 @@ def add_student_t_noise(
         Multiplier on the estimated scale.
     use_robust_scale : bool
         If True, use MAD instead of std for scaling.
-    eps : float, default EPS (1e-8)
-        Numerical stability.
-
+    
     Returns
     -------
     x_noisy : [n_obs, d]

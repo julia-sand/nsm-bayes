@@ -237,7 +237,8 @@ class TurinSimulator:
         elif output == "data":
             y_td = torch.fft.ifft(Y[:nRx, :], dim=1)
             p = torch.abs(y_td) ** 2
-            p_dB = 10 * torch.log10(p + EPS)
+            #make the eps smaller, since 1e-12 is on similar scale to data
+            p_dB = 10 * torch.log10(p.clamp_min(torch.finfo(p.dtype).tiny))
             delta_f = self.B / (self.Ns - 1)
             tau = torch.linspace(0, 1 / delta_f, self.Ns, device=self.device)
             return (

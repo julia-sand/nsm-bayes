@@ -17,7 +17,7 @@ def safe_cholesky(Sigma: torch.Tensor, max_tries: int = 6) -> torch.Tensor:
         return L
     
     eye = torch.eye(Sigma.shape[-1], device=Sigma.device, dtype=Sigma.dtype)
-    #scale = Sigma.diagonal().mean().abs().clamp_min(_EPS)
+
     jitter = 1e-8 #* scale
     for _ in range(max_tries):
         L, info = torch.linalg.cholesky_ex(Sigma + jitter * eye)

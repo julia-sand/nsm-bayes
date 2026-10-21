@@ -136,7 +136,7 @@ def calibrate_beta(posterior: GeneralPosterior,
         # --- Step 6: track effective sample size (ESS) to detect weight degeneracy
         # ESS per bootstrap b: 1 / sum_m W[b,m]^2
         ess = (W**2).sum(dim=1)
-        ess = 1.0 / (ess + EPS)
+        ess = 1.0 / ess
         ess_mean = ess.mean().item()
 
         # If weights have collapsed and we can resample, rejuvenate MCMC at new beta
