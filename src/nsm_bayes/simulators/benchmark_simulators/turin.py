@@ -64,7 +64,7 @@ class TurinSimulator:
         else:
             self.prior_cov = torch.eye(4, dtype=torch.float32, device=self.device)
 
-    def prior(self, num_samples: int | None = None) -> torch.Tensor | MultivariateNormal:
+    def prior(self) -> torch.Tensor | MultivariateNormal:
         """Return the Gaussian prior used in the Turin experiments.
 
         This is the prior defined in ``configs/turin.yaml`` (``prior_mean``
@@ -73,10 +73,7 @@ class TurinSimulator:
 
         Parameters
         ----------
-        num_samples : int or None, default None
-            If provided, returns `num_samples` samples from the prior.
-            If None, returns the MultivariateNormal distribution object.
-
+      
         Returns
         -------
         torch.Tensor or MultivariateNormal
@@ -84,8 +81,7 @@ class TurinSimulator:
             (num_samples, 4). Otherwise, returns the prior distribution.
         """
         dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
-        if num_samples is not None:
-            return dist.sample((num_samples,))
+        
         return dist
 
     def _simulate_channel(
@@ -329,7 +325,7 @@ class TurinSimulator:
         # Create noise (using a random theta or just random normal if appropriate)
         # For consistency with this model, we can sample a random theta from the prior
         if n_out > 0:
-            theta_out = self.prior(num_samples=n_out)
+            theta_out = self.prior.sample(num_samples=n_out)
             x_noise = self.simulate(theta_out, N=n_out)
             x_obs[outlier_indices] = x_noise
             

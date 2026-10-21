@@ -204,7 +204,7 @@ class SIRSimulator:
 
         return y
 
-    def summary(self, y: torch.Tensor, N: float) -> torch.Tensor:
+    def summary(self, y: torch.Tensor, N: float | None = None) -> torch.Tensor:
         """Compute summary statistics for SIR incidence.
 
         Parameters
@@ -253,7 +253,7 @@ class SIRSimulator:
             Tuple of (theta, observed_data, summary_stats), where theta is
             (n, d), observed_data is (n, T) and summary_stats is (n, 3).
         """
-        theta = self.prior((n,))
+        theta = self.prior.sample(n)
         y = self.simulate(theta)
         #summary = self.summary(y)
         
@@ -300,7 +300,7 @@ class SIRSimulator:
 
         # Contaminated samples
         if contaminant == "prior":
-            theta_contam = self.prior((n_contam,))
+            theta_contam = self.prior.sample((n_contam,))
             theta_used[is_contam] = theta_contam
         else:
             # Fallback: just use theta_true for now or a fixed offset
@@ -311,7 +311,7 @@ class SIRSimulator:
 
         return y, is_contam
 
-    def prior(self, num_samples: int | None = None) -> torch.Tensor | MultivariateNormal:
+    def prior(self,) -> torch.Tensor | MultivariateNormal:
         """Return the Gaussian prior used in the SIR experiments.
 
         This is the prior defined in ``configs/sir.yaml`` (``prior_mean``
@@ -320,9 +320,6 @@ class SIRSimulator:
 
         Parameters
         ----------
-        num_samples : int or None, default None
-            If provided, returns `num_samples` samples from the prior.
-            If None, returns the MultivariateNormal distribution object.
 
         Returns
         -------
@@ -331,8 +328,7 @@ class SIRSimulator:
             (num_samples, 4). Otherwise, returns the prior distribution.
         """
         dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
-        if num_samples is not None:
-            return dist.sample((num_samples,))
+        
         return dist
 
     def apply_undercounting_trajectory(self,

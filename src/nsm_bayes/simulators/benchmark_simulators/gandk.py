@@ -161,7 +161,7 @@ class GandKSimulator:
         return x.squeeze()
 
 
-    def prior(self, num_samples: int | None = None) -> torch.Tensor | MultivariateNormal:
+    def prior(self, ) -> torch.Tensor | MultivariateNormal:
         """Return the Gaussian prior used in the gnk experiments.
 
         Parameters
@@ -177,8 +177,7 @@ class GandKSimulator:
             (num_samples, 4). Otherwise, returns the prior distribution.
         """
         dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
-        if num_samples is not None:
-            return dist.sample((num_samples,))
+        
         return dist
     def generate_observed_data(
         self,
@@ -209,7 +208,7 @@ class GandKSimulator:
         outlier_indices = torch.randperm(n_obs)[:n_out]
         
         if n_out > 0:
-            theta_out = self.prior(num_samples=n_out)
+            theta_out = self.prior.sample(num_samples=n_out)
             x_noise = self.simulate(theta_out, n=1).squeeze(-1)
             x_obs[outlier_indices] = x_noise
             

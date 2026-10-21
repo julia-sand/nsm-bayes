@@ -8,32 +8,7 @@ from scipy.stats import chi2
 from tqdm import tqdm
 
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
-
-
-def _mahalanobis_sq_point(
-    theta: torch.Tensor,
-    mu: torch.Tensor,
-    Sigma_inv: torch.Tensor,
-) -> torch.Tensor:
-    """Squared Mahalanobis distance between a point and a Gaussian.
-
-    Parameters
-    ----------
-    theta : torch.Tensor
-        Point of shape ``(d,)``.
-    mu : torch.Tensor
-        Mean of shape ``(d,)``.
-    Sigma_inv : torch.Tensor
-        Inverse covariance of shape ``(d, d)``.
-
-    Returns
-    -------
-    torch.Tensor
-        Scalar tensor with the squared distance.
-    """
-    diff = theta - mu
-    return (diff @ Sigma_inv * diff).sum()
-
+from nsm_bayes.utils.statistics import mahalanobis_sq
 
 @torch.no_grad()
 def calibrate_beta_gpc(
@@ -123,10 +98,10 @@ def calibrate_beta_gpc(
             x_boot = x_obs[indices]
 
             # Posterior evaluated via ConjugatePosterior (original scale)
-            mu_boot, Sigma_inv_boot = posterior.calibrated_posterior(x_boot, beta)
+            mu_boot, Sigma_boot = posterior.calibrated_posterior(x_boot, beta)
 
             # Check if theta_hat_true falls inside the credible region
-            mahalanobis_sq = _mahalanobis_sq_point(theta_hat_true, mu_boot, Sigma_inv_boot)
+            mahalanobis_sq = mahalanobis_sq(theta_hat_true, mu_boot, Sigma_boot)
             if mahalanobis_sq.item() <= chi2_critical_value:
                 coverage_counter += 1
 

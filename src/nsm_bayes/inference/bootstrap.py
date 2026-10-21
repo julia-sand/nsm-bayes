@@ -1,7 +1,7 @@
 import torch
 
 from nsm_bayes.utils.linalg import sigma_inverse
-
+from nsm_bayes.utils.statistics import mahalanobis_sq
 
 def mahalanobis_sq(theta_samples: torch.Tensor, mu: torch.Tensor, Sigma_inv: torch.Tensor):
     xc = theta_samples - mu
@@ -89,14 +89,13 @@ def bootstrap_coverage_indicator(
         weights_row: torch.Tensor,     # (M,)
         theta_hat: torch.Tensor,       # (d,)
         alpha: float,
-        *,
-        eps: float = 1e-12,
         ) -> int:  
     
-    w = weights_row / (weights_row.sum() + eps)
-    mu, Sigma = weighted_mean_cov(theta_samples, w)
-    Sigma_inv = sigma_inverse(Sigma)
-    d2 = mahalanobis_sq(theta_samples, mu, Sigma_inv)
-    thresh = weighted_quantile(d2, w, 1.0 - alpha)
-    d2_hat = (theta_hat - mu).unsqueeze(0) @ Sigma_inv @ (theta_hat - mu).unsqueeze(1)
+    #w = weights_row / (weights_row.sum() + eps)
+    mu, Sigma = weighted_mean_cov(theta_samples,weights_row)# w)
+    #Sigma_inv = sigma_inverse(Sigma)
+    d2 = mahalanobis_sq(theta_samples, mu, Sigma)
+    thresh = weighted_quantile(d2, weights_row, 1.0 - alpha)
+    d2_hat = mahalanobis_sq(theta_hat, mu, Sigma)
+    #(theta_hat - mu).unsqueeze(0) @ Sigma_inv @ (theta_hat - mu).unsqueeze(1)
     return int(d2_hat.item() <= thresh.item())

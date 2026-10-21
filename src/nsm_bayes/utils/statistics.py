@@ -8,6 +8,32 @@ from nsm_bayes.utils.linalg import sigma_inverse
 # functions for getting statistics of observed data
 
 
+def mahalanobis_sq(
+    theta: torch.Tensor,
+    mu: torch.Tensor,
+    Sigma: torch.Tensor,
+) -> torch.Tensor:
+    """Squared Mahalanobis distances for a batch of points.
+
+    Parameters
+    ----------
+    theta : torch.Tensor
+        Points of shape ``(M, d)``.
+    mu : torch.Tensor
+        Mean of shape ``(d,)``.
+    Sigma : torch.Tensor
+        Covariance of shape ``(d, d)``.
+
+    Returns
+    -------
+    torch.Tensor
+        Tensor of shape ``(M,)`` with the squared distance for each point.
+    """
+    Sigma_inv = sigma_inverse(Sigma)
+    diff = theta - mu
+    return (diff @ Sigma_inv * diff).sum(dim=-1)
+
+
 #######----Function to compute robust mean and covariance ----######
 def robust_mean_cov(x_obs):
     """
