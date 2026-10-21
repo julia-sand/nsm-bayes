@@ -92,7 +92,7 @@ def calibrate_beta_gpc(
 
     # --- Device and Dimension Setup ---
     device = x_obs.device
-    d_theta = posterior.prior.mean.shape[0]
+    d_theta = posterior.prior_mean.shape[0]
     n_obs = x_obs.shape[0]
 
     # --- Step 0: Establish the "Ground Truth" Parameter for the Bootstrap ---

@@ -91,11 +91,10 @@ def calibrate_beta(posterior: GeneralPosterior,
 
     # theta_hat_true = argmin_theta L_NSM(theta; x_obs), i.e. NSM M-estimator
     theta_init = theta_samples_base.mean(dim=0)  # starting point
-    theta_hat = posterior.compute_theta_hat_true_general(theta_init=theta_init,
-                                                        num_steps=200,       # tune if needed
-                                                        lr=1e-2,             # tune if needed
-                                                        verbose=False,
-                                                    )
+    theta_hat = posterior.compute_theta_hat_true(theta_init=theta_init,
+                                                  num_steps=200,             # tune if needed
+                                                  lr=1e-2,                  # tune if needed
+                                                )
 
     # --- Initialize in Log-Space ---
     current_beta = beta_init if beta_init is not None else beta_base

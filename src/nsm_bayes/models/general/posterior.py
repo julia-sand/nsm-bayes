@@ -10,10 +10,11 @@ from torch import Tensor
 from torch.func import vmap
 
 from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.models.general.mcmc_settings import MCMCSettings
+from nsm_bayes.models.general.normflow import nle_log_prob_safe
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.weights import weight_function
-from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 
 _log = logging.getLogger(__name__)
 
@@ -27,15 +28,16 @@ class GeneralPosterior:
 
     def __init__(self, x_obs,
                     flow,  #trained density estimate
-                    prior, 
-                    robust: bool,
-                    weight_type: str = "imq", 
+                    prior,
+                    mcmc: MCMCSettings | None = None,
+                    robust: bool = True,
+                    weight_type: str = "imq",
                     c: float = 1.0):
-        
+
         self.flow = flow
         self.x_obs = x_obs
         self.prior = prior
-        self.mcmc = MCMCSettings() #get the mcmc settings
+        self.mcmc = mcmc if mcmc is not None else MCMCSettings()
         self.robust, self.weight_type, self.c = robust, weight_type, c
         self.n_obs = x_obs.shape[0]
 
@@ -63,7 +65,8 @@ class GeneralPosterior:
         torch.Tensor
             Scalar score-matching loss contribution for this observation.
         """
-        log_q = functools.partial(nle_log_prob_safe, self.flow, theta_vec=theta)
+        def log_q(x_obs):
+            return nle_log_prob_safe(self.flow, theta, x_obs=x_obs)
         score, lap = jacobian_and_laplacian(xi, log_q)  # (d_x,), scalar
         return w2_i * (score @ score) + 2.0 * (grad_w2_i @ score) + 2.0 * w2_i * lap
 
