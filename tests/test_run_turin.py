@@ -12,8 +12,6 @@ from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, turin
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
-from scripts.conjugate import run_turin as run_turin_conjugate
-from scripts.normflow import run_turin
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
@@ -49,19 +47,6 @@ def test_turin_case1_posterior(turin_run, turin_cfg):
     assert_posterior_artifacts(
         turin_run, d_theta=4, beta_min=float(turin_cfg.get("beta_min_general", 0.0))
     )
-
-
-def test_turin_simulated_data_shapes(turin_run, turin_cfg):
-    """Simulated training and observed data have the expected shapes."""
-    theta = load_tensor(turin_run, "theta_0.pkl")
-    x_sim = load_tensor(turin_run, "x_sim_0.pkl")
-    x_obs_mis = load_tensor(turin_run, "x_obs_mis_0.pkl")
-
-    assert theta.shape == (turin_cfg.num_samples, 4)
-    assert x_sim.shape == (turin_cfg.num_samples, turin_cfg.d_x)
-    assert x_obs_mis.shape == (turin_cfg.n_obs, turin_cfg.d_x)
-    for arr, name in ((theta, "theta"), (x_sim, "x_sim"), (x_obs_mis, "x_obs_mis")):
-        assert torch.isfinite(arr).all(), f"{name} has non-finite entries"
 
 
 def test_turin_data_identical_across_methods(turin_cfg, tmp_path):

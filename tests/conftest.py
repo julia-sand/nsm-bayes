@@ -17,6 +17,7 @@ tens-of-seconds range:
 """
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -131,53 +132,33 @@ class _StubNLE:
     def load_state_dict(self, state):
         self._mu = state["mu"]
         self._param.data = state["param"]
+    
+    def log_prob(self, input, condition):
+        """``log p(x | theta)`` under a wide Gaussian whose mean is affine in theta.
 
-    def log_prob(self, theta, condition=None):
-        """A smooth, twice-differentiable log-density in ``condition`` (the
-        observation) that also depends on ``theta``.
+        Matches the sbi density-estimator API ``log_prob(input=x, condition=theta)``
+        that ``GeneralModel.log_prob`` and ``GeneralPosterior`` call.
 
-        Matches the sbi ``SNLE`` API: ``log_prob(theta, condition=x_obs)``.
-        ``theta`` may be a single vector of shape ``(d_theta,)`` or a batch
-        of shape ``(*batch_shape, d_theta)``.  ``condition`` is the observed
-        data of shape ``(n_obs, d_x)`` or ``(d_x,)``.
+        Shapes: ``x`` is ``(d_x,)`` or ``(n, d_x)``; ``theta`` is ``(d_theta,)``
+        or ``(n, d_theta)``, broadcasting against ``x``'s leading dims.  Returns
+        ``()`` or ``(n,)``, summed over the ``d_x`` event dim.
 
-        ``calibrate_beta`` computes ``jacrev``/``hessian`` of this w.r.t.
-        ``condition`` and calls ``.backward()`` w.r.t. ``theta``, so the stub
-        must be a non-constant smooth function of both.  A single Gaussian
-        with mean affine in ``theta`` satisfies that and is cheap to evaluate.
+        The score-matching loss differentiates twice w.r.t. ``x`` and the
+        calibration differentiates w.r.t. ``theta``, so the stub is a smooth,
+        non-constant function of both.  The scale is deliberately large so the
+        posterior stays close to the prior.
         """
-        d_x = condition.shape[-1]
-        # deterministic, theta-dependent mean; fixed scale so the stub
-        # likelihood is not too concentrated (keeps posterior wide enough
-        # for z-score checks in regression tests)
+        x, theta = input, condition
+        d_x = x.shape[-1]
         if self._mu is None:
-            self._mu = condition.reshape(-1, d_x).mean(dim=0).detach()
-        # Use a large fixed scale so the stub likelihood is very flat;
-        # the posterior then stays close to the prior, keeping z-scores
-        # (posterior mean vs truth) small for the regression test.
-        scale = torch.tensor(10.0, device=condition.device, dtype=condition.dtype)
-        # theta: (*batch_shape, d_theta); take the first d_x components as a
-        # deterministic shift on the data mean so the likelihood is a smooth,
-        # non-constant function of theta.
-        theta_lead = theta.shape[:-1]
-        th_shift = theta[..., :d_x]
-        # mean shape: (*batch_shape, d_x)
-        mean = self._mu + th_shift
-        var = scale ** 2
-        # condition may be (d_x,) or (n_obs, d_x); expand to match theta batch
-        cond = condition
-        if cond.ndim == 1:
-            cond = cond.unsqueeze(0)
-        # broadcast: cond (n_obs, d_x) or (1, d_x), mean (*batch, d_x)
-        # log N(cond | mean, var * I), summed over the event dim (d_x)
-        diff = cond.unsqueeze(0) - mean  # (*batch, n_obs, d_x) or (batch, d_x)
-        logp = -0.5 * (
-            d_x * torch.log(torch.as_tensor(2.0 * 3.141592653589793, device=condition.device))
-            + d_x * torch.log(var)
-            + (diff ** 2).sum(dim=-1) / var
-        )
-        # keep a (zero-valued) differentiable link to a parameter so the
-        # autograd graph also touches a leaf, matching the real SNLE surface
+            raise RuntimeError("_StubNLE.log_prob called before append_simulations")
+        if theta.shape[-1] < d_x:
+            raise ValueError(f"stub needs d_theta >= d_x, got {theta.shape[-1]} < {d_x}")
+        mean = self._mu.reshape(d_x) + theta[..., :d_x]     # (..., d_x)
+        var = 10.0 ** 2
+        logp = -0.5 * (d_x * math.log(2.0 * math.pi * var)
+                       + ((x - mean) ** 2).sum(dim=-1) / var)
+        # zero-valued link to a leaf parameter, like the real estimator's graph
         return logp + self._param * 0.0
 
     def build_posterior(self, density_estimator=None, prior=None,

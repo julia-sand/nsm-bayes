@@ -11,16 +11,7 @@ import torch
 from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, turin
-from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
-from scripts.conjugate import run_turin
-from scripts.normflow import run_turin as run_turin_normflow
 from tests.conftest import assert_posterior_artifacts, load_tensor
-
-
-def _theta_true() -> torch.Tensor:
-    """Return the log-space ``theta_true`` from ``configs/turin.yaml``."""
-    cfg = OmegaConf.load("configs/turin.yaml")
-    return torch.log(torch.tensor(cfg.theta_true, dtype=torch.float32))
 
 
 @pytest.fixture

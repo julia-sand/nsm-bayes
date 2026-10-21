@@ -13,10 +13,8 @@ from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, gnk
 from nsm_bayes.simulators.benchmark_simulators.simulators import GNKSimulator
-from scripts.conjugate import run_gnk
-from scripts.normflow import run_gnk as run_gnk_normflow
-from tests.conftest import assert_posterior_artifacts, load_tensor
 
+from tests.conftest import assert_posterior_artifacts, load_tensor
 
 def _theta_true() -> torch.Tensor:
     """Return the ``theta_true`` from ``configs/gnk.yaml``."""

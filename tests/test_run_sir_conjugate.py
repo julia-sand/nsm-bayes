@@ -12,10 +12,7 @@ import pytest
 import torch
 
 from nsm_bayes.experiments import common, sir
-from scripts.conjugate import run_sir
-from scripts.normflow import run_sir as run_sir_normflow
 from tests.conftest import assert_posterior_artifacts, load_tensor
-
 
 @pytest.fixture
 def sir_run(sir_cfg, tmp_path):

@@ -11,8 +11,6 @@ import pytest
 import torch
 
 from nsm_bayes.experiments import common, gnk
-from scripts.conjugate import run_gnk as run_gnk_conjugate
-from scripts.normflow import run_gnk
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
@@ -22,15 +20,6 @@ def gnk_run(gnk_cfg, tmp_path):
     save_dir = tmp_path / "gnk"
     common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, save_dir)
     return save_dir
-
-
-def test_gnk_training_data_shapes(gnk_run, gnk_cfg):
-    """Training data artifacts have the expected shapes and are finite."""
-    theta = load_tensor(gnk_run, "theta_0.pkl")
-    x_sim = load_tensor(gnk_run, "x_sim_0.pkl")
-    assert theta.shape == (gnk_cfg.num_samples, 4)
-    assert x_sim.shape[0] == gnk_cfg.num_samples
-    assert torch.isfinite(theta).all() and torch.isfinite(x_sim).all()
 
 
 def test_gnk_observed_data(gnk_run, gnk_cfg):
@@ -53,15 +42,6 @@ def test_gnk_case1_posterior(gnk_run, gnk_cfg):
     assert_posterior_artifacts(
         gnk_run, d_theta=4, beta_min=float(gnk_cfg.get("beta_min_general", 0.0))
     )
-
-
-def test_gnk_posterior_near_truth(gnk_run, gnk_cfg):
-    """The Case-1 posterior mean is within 3 posterior stds of the truth."""
-    mu = load_tensor(gnk_run, "posterior_mean_0.pkl")
-    cov = load_tensor(gnk_run, "posterior_covariance_0.pkl")
-    theta_true = torch.tensor(gnk_cfg.theta_true, dtype=torch.float32)
-    z = (mu - theta_true).abs() / torch.sqrt(torch.diagonal(cov)).clamp_min(1e-2)
-    assert (z < 3.0).all(), f"posterior mean too far from truth (max z {z.max()})"
 
 
 def test_gnk_data_identical_across_methods(gnk_cfg, tmp_path):

@@ -11,8 +11,6 @@ import torch
 
 from nsm_bayes.experiments import common, sir_undercounting
 from nsm_bayes.utils import set_seed
-from scripts.conjugate import run_sir_undercounting as run_sir_uc_conjugate
-from scripts.normflow import run_sir_undercounting
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
