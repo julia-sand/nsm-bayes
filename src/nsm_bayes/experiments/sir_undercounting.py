@@ -36,7 +36,9 @@ def build_problem(cfg: DictConfig) -> tuple:
 
 def generate_data(
     sim: SIRSimulator,
+    prior,
     theta_true,
+    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the SIR undercounting data.

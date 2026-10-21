@@ -27,6 +27,8 @@ from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.normflow import GeneralModel
 from nsm_bayes.models.general.posterior import GeneralPosterior
 from nsm_bayes.models.general.mcmc_settings import MCMCSettings
+from nsm_bayes.utils.statistics import estimate_stats
+from nsm_bayes.utils.linalg import sigma_inverse
 
 from nsm_bayes.utils import set_seed
 
@@ -147,6 +149,15 @@ def run_normflow_methods(
     save(save_dir, "samples_sm_general", rep, samples_sm_general)
     save(save_dir, "gpc_history_general", rep, history)
     save(save_dir, "beta_general", rep, beta)
+    # Save Case-1 named artifacts (used by regression tests)
+    save(save_dir, "gpc_history_case1", rep, history)
+    save(save_dir, "beta_case1", rep, beta)
+
+    # save the posterior moments of the calibrated general samples
+    if samples_sm_general.ndim == 2 and samples_sm_general.shape[0] > 1:
+        mu_hat, Sigma_hat = estimate_stats(samples_sm_general, cfg.robust_flag)
+        save(save_dir, "posterior_mean_case1", rep, mu_hat)
+        save(save_dir, "posterior_covariance_case1", rep, Sigma_hat)
 
 
 def run_conjugate_method(
