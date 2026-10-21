@@ -2,24 +2,28 @@
 Corner plot of the score-matching ("Ours") posterior samples, reproducing
 the left-hand panel of the figure (NLE omitted).
 
-Reads the pickles written by the normflow run scripts and resolves the data
-directory from the YAML config:
+Takes the directory that holds the pickles written by the normflow run
+scripts, e.g.
 
-    data/<experiment_name>/samples_sm_general_<ind>.pkl
-    data/<experiment_name>/eps=<epsilon>/de=<de>/samples_sm_general_<ind>.pkl
+    data/gnk/
+    data/turin/eps=0.1/de=mdn/
 
-The second layout is used when the config has ``epsilon`` and
-``density_estimator`` keys (e.g. the Turin experiment).
+and plots ``samples_sm_general_<IND>.pkl`` from it, saving
+``corner_ours_<IND>.pdf`` next to it. The true parameter is read from
+``configs/<folder>.yaml``, using the deepest folder in the path that has a
+config (``data/turin/eps=0.1/de=mdn`` -> ``turin.yaml``). If none matches,
+the plot is drawn without the true-theta markers.
 
 Usage:
-    python plot_gnk.py --config configs/gnk.yaml --ind 0
-    python plot_gnk.py --config configs/turin.yaml --ind 3 --out corner.pdf
+    python plot_gnk.py data/gnk
+
+Plot settings are the constants below.
 """
 
 from __future__ import annotations
 
-import argparse
 import pickle
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -37,6 +41,12 @@ plt.rcParams.update({
 
 OURS_COLOR = "#C0504D"
 
+# Defaults
+IND = 0              # Repetition index to plot
+BINS = 30            # Histogram bins on the diagonal
+MAX_SCATTER = 500    # Max points in each off-diagonal scatter
+LIMITS = None        # Axis limits [(lo1, hi1), (lo2, hi2), ...]; None = automatic
+
 
 def to_numpy(a) -> np.ndarray:
     """Convert a torch tensor or array-like to a numpy array."""
@@ -51,64 +61,35 @@ def load_pickle(path: Path) -> object:
         return pickle.load(f)
 
 
-def load_config(config_path: str | Path) -> OmegaConf.DictConfig:
-    """Load a YAML config file and resolve Hydra-style ``defaults``.
+# This file lives at src/nsm_bayes/viz/, so the repo root is three levels up.
+CONFIGS_DIR = Path(__file__).resolve().parents[3] / "configs"
 
-    If the file contains a ``defaults`` list with string entries (e.g.
-    ``- _base``), each corresponding ``<entry>.yaml`` in the same
-    directory is loaded and merged (child overrides base).
 
-    Parameters
-    ----------
-    config_path : str or Path
-        Path to the YAML config file.
+def load_theta_true(data_dir: Path) -> np.ndarray | None:
+    """Read ``theta_true`` from the experiment's config.
 
-    Returns
-    -------
-    OmegaConf.DictConfig
-        Fully resolved configuration.
+    Configs are named after the experiment they write to (``gnk.yaml`` ->
+    ``data/gnk/``), so the deepest folder in *data_dir* with a matching
+    ``configs/<folder>.yaml`` is used: ``data/turin/eps=0.1/de=mdn`` ->
+    ``turin.yaml``. String entries in the config's ``defaults`` list are
+    merged in underneath it, which is how ``sir_undercounting.yaml`` gets
+    ``theta_true`` from ``sir.yaml``.
+
+    Returns ``None`` if no config is found or it has no ``theta_true``.
     """
-    cfg_path = Path(config_path)
-    cfg = OmegaConf.load(cfg_path)
-    if "defaults" in cfg:
-        defaults = cfg.get("defaults")
-        if defaults:
-            resolved = []
-            for entry in defaults:
-                if isinstance(entry, str) and entry != "_self_":
-                    base_path = cfg_path.parent / f"{entry}.yaml"
-                    if base_path.exists():
-                        resolved.append(OmegaConf.load(base_path))
-            if resolved:
-                cfg = OmegaConf.merge(*resolved, cfg)
-    return cfg
+    candidates = (CONFIGS_DIR / f"{part}.yaml"
+                  for part in reversed(data_dir.absolute().parts))
+    config = next((c for c in candidates if c.is_file()), None)
+    if config is None:
+        return None
 
-
-def resolve_save_dir(cfg: OmegaConf.DictConfig, data_root: str | Path) -> Path:
-    """Resolve the data directory for a config.
-
-    Standard layout:
-        data/<experiment_name>/
-    Turin-style layout (when ``epsilon`` and ``density_estimator`` are
-    present in the config):
-        data/<experiment_name>/eps=<epsilon>/de=<density_estimator>/
-
-    Parameters
-    ----------
-    cfg : OmegaConf.DictConfig
-        Resolved configuration.
-    data_root : str or Path
-        Root data directory (e.g. ``"data"``).
-
-    Returns
-    -------
-    Path
-        Directory containing the sample pickles.
-    """
-    save_dir = Path(data_root) / cfg.experiment_name
-    if "epsilon" in cfg and "density_estimator" in cfg:
-        save_dir = save_dir / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}"
-    return save_dir
+    cfg = OmegaConf.load(config)
+    bases = [OmegaConf.load(CONFIGS_DIR / f"{entry}.yaml")
+             for entry in cfg.get("defaults", [])
+             if isinstance(entry, str) and entry != "_self_"]
+    cfg = OmegaConf.merge(*bases, cfg)
+    print(f"Using config {config}")
+    return np.array(list(cfg.theta_true), dtype=float) if "theta_true" in cfg else None
 
 
 def corner_plot(samples, theta_true=None, labels=None, limits=None,
@@ -177,40 +158,31 @@ def corner_plot(samples, theta_true=None, labels=None, limits=None,
 
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True,
-                   help="Path to the YAML config file.")
-    p.add_argument("--ind", type=int, default=0, help="Repetition index.")
-    p.add_argument("--data-dir", default="data")
-    p.add_argument("--limits", type=float, nargs="+", default=None,
-                   help="Axis limits as lo1 hi1 lo2 hi2 ...")
-    p.add_argument("--max-scatter", type=int, default=500)
-    p.add_argument("--bins", type=int, default=30)
-    p.add_argument("--out", default=None)
-    args = p.parse_args()
+    if len(sys.argv) != 2:
+        raise SystemExit("Usage: python plot_gnk.py DATA_DIR   (e.g. data/gnk)")
+    data_dir = Path(sys.argv[1])
 
-    cfg = load_config(args.config)
-    save_dir = resolve_save_dir(cfg, args.data_dir)
+    pkl_path = data_dir / f"samples_sm_general_{IND}.pkl"
+    if not pkl_path.exists():
+        available = sorted(q.name for q in data_dir.glob("samples_sm_general_*.pkl"))
+        raise SystemExit(f"{pkl_path} not found. Available: {available or 'none'}")
 
-    theta_true = np.array(list(cfg.theta_true), dtype=float)
+    theta_true = load_theta_true(data_dir)
+    if theta_true is None:
+        print("No matching config found; plotting without true theta.")
 
-    pkl_path = save_dir / f"samples_sm_general_{args.ind}.pkl"
     samples = to_numpy(load_pickle(pkl_path))
-    d = theta_true.shape[0]
+    d = theta_true.shape[0] if theta_true is not None else samples.shape[-1]
     samples = samples.reshape(-1, d)
     print(f"Loaded {pkl_path} -> {samples.shape}")
 
-    limits = None
-    if args.limits is not None:
-        assert len(args.limits) == 2 * d, "need lo/hi pair per parameter"
-        limits = list(zip(args.limits[0::2], args.limits[1::2]))
+    fig = corner_plot(samples, theta_true=theta_true, limits=LIMITS,
+                      bins=BINS, max_scatter=MAX_SCATTER)
 
-    fig = corner_plot(samples, theta_true=theta_true, limits=limits,
-                      bins=args.bins, max_scatter=args.max_scatter)
-
-    out = args.out or str(save_dir / f"corner_ours_{args.ind}.pdf")
+    out = data_dir / f"corner_ours_{IND}.pdf"
     fig.savefig(out, bbox_inches="tight")
     print(f"Saved {out}")
+
 
 if __name__ == "__main__":
     main()

@@ -237,10 +237,10 @@ def assert_posterior_artifacts(save_dir: Path, ind: int = 0, d_theta: int = 4,
                                beta_min: float = 1e-6):
     """Assert the Case-1 posterior artifacts are present and structurally valid."""
     import torch
-    mu = load_tensor(save_dir, f"posterior_mean_case1_{ind}.pkl")
-    cov = load_tensor(save_dir, f"posterior_covariance_case1_{ind}.pkl")
-    beta = load_tensor(save_dir, f"beta_case1_{ind}.pkl")
-    hist = load_tensor(save_dir, f"gpc_history_case1_{ind}.pkl")
+    mu = load_tensor(save_dir, f"posterior_mean_{ind}.pkl")
+    cov = load_tensor(save_dir, f"posterior_covariance_{ind}.pkl")
+    beta = load_tensor(save_dir, f"beta_{ind}.pkl")
+    hist = load_tensor(save_dir, f"gpc_history_{ind}.pkl")
 
     assert mu.shape == (d_theta,), f"posterior mean shape {tuple(mu.shape)}"
     assert torch.isfinite(mu).all(), "posterior mean has non-finite entries"
@@ -248,7 +248,7 @@ def assert_posterior_artifacts(save_dir: Path, ind: int = 0, d_theta: int = 4,
     assert torch.allclose(cov, cov.T, atol=1e-3), "posterior covariance not symmetric"
     eig = torch.linalg.eigvalsh(cov)
     assert eig.min().item() > 0, f"posterior covariance not positive definite (min eig {eig.min()})"
-    assert float(beta) >= beta_min, f"beta_case1 {beta} < beta_min {beta_min}"
+    assert float(beta) >= beta_min, f"beta {beta} < beta_min {beta_min}"
     for key in ("betas", "coverages"):
         assert key in hist, f"gpc history missing key {key!r}"
         assert all(torch.isfinite(torch.as_tensor(v)).all() for v in hist[key])

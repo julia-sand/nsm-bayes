@@ -17,7 +17,7 @@ from nsm_bayes.experiments import common, sir_undercounting
 @hydra.main(version_base=None, config_path="../../configs", config_name="sir_undercounting")
 def run_sir_undercounting(cfg: DictConfig):
     """Hydra entry point for the SIR undercounting experiment."""
-    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name / "general"
     common.run_experiment(cfg, sir_undercounting, common.run_normflow_methods, save_dir)
 
 

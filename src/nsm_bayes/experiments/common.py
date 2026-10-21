@@ -102,8 +102,8 @@ def run_normflow_methods(
     posterior, calibrates ``beta`` and finally samples the calibrated
     general posterior.  Saves ``likelihood_estimator_full``,
     ``cost_nle_training``, ``samples_nle_mis``, ``cost_nle_mcmc``,
-    ``samples_sm_general``, ``cost_sm_general_mcmc``, ``beta_general`` and
-    ``gpc_history_general`` for this repetition.
+    ``samples_sm``, ``cost_sm_mcmc``, ``beta``, ``gpc_history``,
+    ``posterior_mean`` and ``posterior_covariance`` for this repetition.
     """
     x_obs_mis = data.x_obs_mis
 
@@ -119,7 +119,7 @@ def run_normflow_methods(
             data.theta,
             data.x_sim,
         )
-    torch.save(flow.estimator, save_dir / f"likelihood_estimator_full_{rep}.pt")
+    torch.save(flow_model.estimator, save_dir / f"likelihood_estimator_full_{rep}.pt")
 
     #sample the baseline posterior
     with timed(save_dir, "nle_mcmc", rep):
@@ -131,11 +131,11 @@ def run_normflow_methods(
 
     #estimate the robust statistics
     #set up a posterior for calibration
-    beta_posterior = GeneralPosterior(flow=flow_model, x_obs=x_obs_mis, prior=prior,
+    beta_posterior = GeneralPosterior(flow_model=flow_model, x_obs=x_obs_mis, prior=prior,
                                 mcmc=mcmc, robust=cfg.robust_flag)
     
     #calibrate beta / temperature
-    with timed(save_dir, "sm_general_mcmc", rep):
+    with timed(save_dir, "sm_mcmc", rep):
         theta_samples_base = beta_posterior.sample(cfg.beta_base_general)
 
         beta, history = calibrate_beta(beta_posterior, theta_samples_base, 
@@ -145,18 +145,15 @@ def run_normflow_methods(
         
         samples_sm_general = beta_posterior.sample(beta)
 
-    save(save_dir, "samples_sm_general", rep, samples_sm_general)
-    save(save_dir, "gpc_history_general", rep, history)
-    save(save_dir, "beta_min_general", rep, beta)
-    # Save Case-1 named artifacts (used by regression tests)
-    #save(save_dir, "gpc_history_case1", rep, history)
-    #save(save_dir, "beta_case1", rep, beta)
+    save(save_dir, "samples_sm", rep, samples_sm_general)
+    save(save_dir, "gpc_history", rep, history)
+    save(save_dir, "beta", rep, beta)
 
     # save the posterior moments of the calibrated general samples
     if samples_sm_general.ndim == 2 and samples_sm_general.shape[0] > 1:
         mu_hat, Sigma_hat = estimate_stats(samples_sm_general, cfg.robust_flag)
-        save(save_dir, "posterior_mean_general", rep, mu_hat)
-        save(save_dir, "posterior_covariance_general", rep, Sigma_hat)
+        save(save_dir, "posterior_mean", rep, mu_hat)
+        save(save_dir, "posterior_covariance", rep, Sigma_hat)
 
 
 def run_conjugate_method(
@@ -171,9 +168,8 @@ def run_conjugate_method(
     Fits a :class:`~nsm_bayes.models.conjugate.conj_model.ConjugateModel`
     on the simulation data, calibrates ``beta`` with GPC and computes the
     calibrated posterior.  Saves ``conjugate_nets``,
-    ``cost_sm_case1_train``, ``posterior_mean_case1``,
-    ``posterior_covariance_case1``, ``gpc_history_case1``,
-    ``beta_case1`` and ``cost_sm_case1_posterior`` for this repetition.
+    ``cost_sm_train``, ``posterior_mean``, ``posterior_covariance``,
+    ``gpc_history``, ``beta`` and ``cost_sm_posterior`` for this repetition.
     """
     x_obs_mis = data.x_obs_mis
     d_theta = data.theta.shape[1]
@@ -185,7 +181,7 @@ def run_conjugate_method(
     model = model.to(device=dev, dtype=x_obs_mis.dtype)
 
     #train the model
-    with timed(save_dir, "sm_case1_train", rep):
+    with timed(save_dir, "sm_train", rep):
         model.fit(x_sim=data.x_sim, theta_sim=data.theta)
     
     model.save_checkpoint(cfg, save_dir, rep)
@@ -198,7 +194,7 @@ def run_conjugate_method(
         weight_type="imq",
     )
 
-    with timed(save_dir, "sm_case1_posterior", rep):
+    with timed(save_dir, "sm_posterior", rep):
         #calibrate the temperature
         beta, history = calibrate_beta_gpc(
             x_obs_mis,
@@ -215,10 +211,10 @@ def run_conjugate_method(
             x_obs_mis,
             beta)
 
-    save(save_dir, "posterior_mean_case1", rep, mu_n)
-    save(save_dir, "posterior_covariance_case1", rep, Sigma_n)
-    save(save_dir, "gpc_history_case1", rep, history)
-    save(save_dir, "beta_case1", rep, beta)
+    save(save_dir, "posterior_mean", rep, mu_n)
+    save(save_dir, "posterior_covariance", rep, Sigma_n)
+    save(save_dir, "gpc_history", rep, history)
+    save(save_dir, "beta", rep, beta)
 
 
 def run_experiment(

@@ -13,7 +13,7 @@ from nsm_bayes.experiments import common, gnk
 @hydra.main(version_base=None, config_path="../../configs", config_name="gnk")
 def run_gnk(cfg: DictConfig):
     """Hydra entry point for the g-and-k experiment."""
-    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name / "general"
     common.run_experiment(cfg, gnk, common.run_normflow_methods, save_dir)
 
 

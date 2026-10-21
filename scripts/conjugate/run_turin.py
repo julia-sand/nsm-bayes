@@ -18,7 +18,7 @@ from nsm_bayes.experiments import common, turin
 def run_turin(cfg: DictConfig):
     """Hydra entry point for the Turin channel-model experiment."""
     save_dir = (
-        Path(get_original_cwd()) / "data" / cfg.experiment_name
+        Path(get_original_cwd()) / "data" / cfg.experiment_name / "conjugate"
         / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}"
     )
     common.run_experiment(cfg, turin, common.run_conjugate_method, save_dir)

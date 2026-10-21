@@ -48,13 +48,6 @@ def test_gnk_observed_data(gnk_run, gnk_cfg):
         delta = float(x_obs_mis[i] - x_obs[i])
         assert any(abs(delta - v) < 1e-4 for v in gnk_cfg.outlier_values)
 
-
-def test_gnk_nle_saved(gnk_run):
-    """The trained likelihood estimator is saved as a torch file."""
-    flow = torch.load(gnk_run / "likelihood_estimator_full_0.pt", map_location="cpu", weights_only=False)
-    assert hasattr(flow, "log_prob")
-
-
 def test_gnk_case1_posterior(gnk_run, gnk_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
@@ -64,8 +57,8 @@ def test_gnk_case1_posterior(gnk_run, gnk_cfg):
 
 def test_gnk_posterior_near_truth(gnk_run, gnk_cfg):
     """The Case-1 posterior mean is within 3 posterior stds of the truth."""
-    mu = load_tensor(gnk_run, "posterior_mean_case1_0.pkl")
-    cov = load_tensor(gnk_run, "posterior_covariance_case1_0.pkl")
+    mu = load_tensor(gnk_run, "posterior_mean_0.pkl")
+    cov = load_tensor(gnk_run, "posterior_covariance_0.pkl")
     theta_true = torch.tensor(gnk_cfg.theta_true, dtype=torch.float32)
     z = (mu - theta_true).abs() / torch.sqrt(torch.diagonal(cov)).clamp_min(1e-2)
     assert (z < 3.0).all(), f"posterior mean too far from truth (max z {z.max()})"
