@@ -84,7 +84,7 @@ def generate_data(
         x_sim=x_sim,
         x_obs_mis=x_obs_mis,
         x_obs=x_obs,
-        extras={"is_contam": is_contam},
+        extras={"y_obs": y_obs, "is_contam": is_contam}, 
     )
 
 

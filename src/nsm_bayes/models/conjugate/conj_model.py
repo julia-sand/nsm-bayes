@@ -80,3 +80,14 @@ class ConjugateModel(nn.Module):
         },
             save_dir / f"conjugate_nets_{ind}.pt"
         )
+
+    def load_checkpoint(self, path) -> "ConjugateModel":
+        """Load the trained nets and standardizers written by
+        :meth:`save_checkpoint`, onto this model's device. Returns self."""
+        device = next(self.parameters()).device
+        ckpt = torch.load(path, map_location=device, weights_only=False)
+        self.T_phi.load_state_dict(ckpt["T_phi_state_dict"])
+        self.b_phi.load_state_dict(ckpt["B_phi_state_dict"])
+        self.standardizer_x.load_state_dict(ckpt["standardizer_x_state_dict"])
+        self.standardizer_theta.load_state_dict(ckpt["standardizer_theta_state_dict"])
+        return self

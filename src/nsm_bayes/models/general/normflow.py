@@ -40,6 +40,16 @@ class GeneralModel():
         self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
         return self
 
+    def load_checkpoint(self, path):
+        """Load a trained likelihood estimator saved with ``torch.save``.
+
+        The whole estimator module is pickled (not just a state dict), so
+        ``weights_only=False`` is required. The flow is trained on the CPU,
+        so it is loaded onto the CPU too. Returns self.
+        """
+        self.estimator = torch.load(path, map_location="cpu", weights_only=False)
+        return self
+
     def log_prob(self, x_obs, theta_vec=None):
         """Evaluate the flow's log-probability, clamping non-finite values.
 
@@ -75,7 +85,10 @@ class GeneralModel():
         torch.Tensor
             Samples from the posterior.
         """
+        # Pass the estimator explicitly so this also works when it was loaded
+        # from a checkpoint rather than trained by ``self.trainer``.
         posterior = self.trainer.build_posterior(
+            density_estimator=self.estimator,
             sample_with="mcmc", mcmc_method=mcmc_method
         )
         return posterior.sample(

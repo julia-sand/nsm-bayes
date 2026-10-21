@@ -73,6 +73,7 @@ class ExperimentData:
 # The method step signature: (data, prior, cfg, save_dir, rep) -> None.
 MethodStep = Callable[[ExperimentData, Any, DictConfig, Path, int], None]
 
+
 def save(save_dir: Path, name: str, rep: int, obj: Any) -> None:
     """Pickle ``obj`` to ``save_dir / f"{name}_{rep}.pkl"``."""
     with open(save_dir / f"{name}_{rep}.pkl", "wb") as fh:
@@ -100,7 +101,9 @@ def run_normflow_methods(
 
     Trains the flow on the simulation data, samples the baseline NLE
     posterior, calibrates ``beta`` and finally samples the calibrated
-    general posterior.  Saves ``likelihood_estimator_full``,
+    general posterior.  If ``likelihood_estimator_full_{rep}.pt`` already
+    exists in ``save_dir``, the flow is loaded from it and training (and
+    ``cost_nle_training``) is skipped.  Saves ``likelihood_estimator_full``,
     ``cost_nle_training``, ``samples_nle_mis``, ``cost_nle_mcmc``,
     ``samples_sm``, ``cost_sm_mcmc``, ``beta``, ``gpc_history``,
     ``posterior_mean`` and ``posterior_covariance`` for this repetition.
@@ -113,13 +116,18 @@ def run_normflow_methods(
 
     flow_model = GeneralModel(prior, mcmc_settings=mcmc, density_estimator=cfg.get("density_estimator", "maf"))
 
-    #train the surrogate model
-    with timed(save_dir, "nle_training", rep):
-        flow_model.fit(
-            data.theta,
-            data.x_sim,
-        )
-    torch.save(flow_model.estimator, save_dir / f"likelihood_estimator_full_{rep}.pt")
+    #train the surrogate model, or reuse a trained checkpoint from save_dir
+    ckpt_path = save_dir / f"likelihood_estimator_full_{rep}.pt"
+    if ckpt_path.is_file():
+        _log.info("Loading trained surrogate from %s; skipping training", ckpt_path)
+        flow_model.load_checkpoint(ckpt_path)
+    else:
+        with timed(save_dir, "nle_training", rep):
+            flow_model.fit(
+                data.theta,
+                data.x_sim,
+            )
+        torch.save(flow_model.estimator, ckpt_path)
 
     #sample the baseline posterior
     with timed(save_dir, "nle_mcmc", rep):
@@ -167,7 +175,9 @@ def run_conjugate_method(
 
     Fits a :class:`~nsm_bayes.models.conjugate.conj_model.ConjugateModel`
     on the simulation data, calibrates ``beta`` with GPC and computes the
-    calibrated posterior.  Saves ``conjugate_nets``,
+    calibrated posterior.  If ``conjugate_nets_{rep}.pt`` already exists in
+    ``save_dir``, the model is loaded from it and training (and
+    ``cost_sm_train``) is skipped.  Saves ``conjugate_nets``,
     ``cost_sm_train``, ``posterior_mean``, ``posterior_covariance``,
     ``gpc_history``, ``beta`` and ``cost_sm_posterior`` for this repetition.
     """
@@ -180,11 +190,16 @@ def run_conjugate_method(
     dev = x_obs_mis.device
     model = model.to(device=dev, dtype=x_obs_mis.dtype)
 
-    #train the model
-    with timed(save_dir, "sm_train", rep):
-        model.fit(x_sim=data.x_sim, theta_sim=data.theta)
-    
-    model.save_checkpoint(cfg, save_dir, rep)
+    #train the model, or reuse a trained checkpoint from save_dir
+    ckpt_path = save_dir / f"conjugate_nets_{rep}.pt"
+    if ckpt_path.is_file():
+        _log.info("Loading trained surrogate from %s; skipping training", ckpt_path)
+        model.load_checkpoint(ckpt_path)
+    else:
+        with timed(save_dir, "sm_train", rep):
+            model.fit(x_sim=data.x_sim, theta_sim=data.theta)
+
+        model.save_checkpoint(cfg, save_dir, rep)
 
     posterior = ConjugatePosterior(
         model,
