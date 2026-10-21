@@ -76,6 +76,7 @@ def generate_data(
         Training data ``(theta, x_sim)`` and observed data; no extras.
     """
     theta, x_sim = sim.generate_training_data(cfg.num_samples)
+    
     x_obs_mis = sim.generate_observed_data(
         theta_true, n_obs=cfg.n_obs, epsilon=cfg.epsilon
     )

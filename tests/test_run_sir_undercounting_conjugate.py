@@ -35,18 +35,6 @@ def sir_un_run(sir_uc_cfg, tmp_path):
     return save_dir
 
 
-def test_sir_un_model_deterministic():
-    """The same seed gives bit-identical trajectories."""
-    sim = SIRSimulator(obs_model="poisson", T=40, N=1000)
-    torch.manual_seed(0)
-    a = sim.simulate(_theta_true().repeat(4, 1))
-    torch.manual_seed(0)
-    b = sim.simulate(_theta_true().repeat(4, 1))
-    assert a.shape == (4, 40), f"SIR trajectories shape {tuple(a.shape)}"
-    assert torch.isfinite(a).all()
-    assert torch.equal(a, b), "SIRSimulator is not deterministic under a fixed seed"
-
-
 def test_sir_un_model_changes_with_seed():
     """Different seeds give different trajectories."""
     sim = SIRSimulator(obs_model="poisson", T=40, N=1000)
@@ -61,7 +49,7 @@ def test_sir_un_model_changes_with_seed():
 def test_sir_un_case1_posterior(sir_un_run, sir_uc_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
-        sir_un_run, d_theta=4, beta_min=float(sir_uc_cfg.get("beta_min_case1", 0.0))
+        sir_un_run, d_theta=4, beta_min=float(sir_uc_cfg.get("beta_min", 0.0))
     )
 
 

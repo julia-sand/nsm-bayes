@@ -33,12 +33,20 @@ def build_problem(cfg: DictConfig) -> tuple:
         unconstrained (log/logit) parameter space.
     """
     dtype = torch.float32
+  
+    prior_mean_constrained = torch.tensor(list(cfg.prior_mean),dtype=dtype)       # prior_mean
+    prior_mean = torch.stack([
+        prior_mean_constrained[0].log(),
+        prior_mean_constrained[1].log(),
+        prior_mean_constrained[2].logit(),
+        prior_mean_constrained[3].log(),
+    ])
     prior_std = torch.tensor(cfg.prior_std, dtype=dtype)
     prior_cov = torch.diag(prior_std**2)
 
     sim = SIRSimulator(
         obs_model=cfg.obs_model if "obs_model" in cfg else "poisson",
-        prior_mean=torch.tensor(list(cfg.prior_mean),dtype=dtype),
+        prior_mean=prior_mean,
         prior_cov=prior_cov,
         T=cfg.T_sir,
         N=cfg.N_sir,

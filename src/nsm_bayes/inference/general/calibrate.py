@@ -146,7 +146,6 @@ def calibrate_beta(posterior: GeneralPosterior,
 
             # recompute cached losses with the refreshed samples
             ell, L_orig = posterior.per_x_losses(theta_samples_base, )
-            #cache_perx_sm_losses(theta_samples_base, x_obs, q_phi_log_prob, w2, grad_w2)
 
             current_beta_base = current_beta
 

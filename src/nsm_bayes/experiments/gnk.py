@@ -69,9 +69,10 @@ def generate_data(
         Training data ``(theta, x_sim)`` and observed data; the extras
         hold ``outlier_indices``.
     """
-    theta = prior.sample((cfg.num_samples,))
-    x_sim = sim.simulate(theta).unsqueeze(-1)
-
+    #theta = prior.sample((cfg.num_samples,))
+    #x_sim = sim.simulate(theta).unsqueeze(-1)
+    theta,x_sim = sim.generate_training_data(cfg.num_samples)
+    
     x_obs = sim.simulate(theta_true, n=cfg.n_obs).unsqueeze(-1)
     x_obs_mis, outlier_indices = add_outliers_by_proportion(
         x_obs, cfg.epsilon, cfg.outlier_values

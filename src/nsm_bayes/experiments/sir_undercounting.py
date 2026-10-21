@@ -65,7 +65,8 @@ def generate_data(
     """
     
     #training data for surrogate density 
-    theta, x_sim = sim.generate_training_data(cfg.num_samples, )
+    theta, y_sim = sim.generate_training_data(cfg.num_samples, )
+    x_sim = sim.summary(y_sim)
 
     #clean data set 
     theta_batch = theta_true.unsqueeze(0).repeat(cfg.n_obs, 1)

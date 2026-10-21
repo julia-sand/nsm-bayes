@@ -40,7 +40,7 @@ class GeneralModel():
         self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
         return self
 
-    def log_prob(self, theta_vec, x_obs=None):
+    def log_prob(self, x_obs, theta_vec=None):
         """Evaluate the flow's log-probability, clamping non-finite values.
 
         Parameters
@@ -56,13 +56,10 @@ class GeneralModel():
             Log-probabilities with a trailing ``(1,)`` dimension,
             clamped to a minimum of -1e10.
         """
-        lp = self.estimator.log_prob(theta_vec, condition=x_obs)
+        lp = self.estimator.log_prob(x_obs,condition=theta_vec)
         
         return torch.clamp(lp, min=-1e10)
     
-    
-        #return nle_log_prob_safe(self.estimator, theta_vec, x_obs=x_obs)
-
     def sample_nle_posterior(self, x_obs, mcmc_method="slice_np"):
         """Sample from the NLE posterior q(theta | x_obs) via MCMC.
 

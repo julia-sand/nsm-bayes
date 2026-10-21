@@ -65,7 +65,7 @@ class GeneralPosterior:
             Scalar score-matching loss contribution for this observation.
         """
 
-        log_q_lambda = lambda xi : self.flow.estimator.log_prob(theta,xi).reshape(1) #self.log_q(xi,theta) 
+        log_q_lambda = lambda xi : self.flow.estimator.log_prob(xi,theta).reshape(1) #self.log_q(xi,theta) 
         score, lap = jacobian_and_laplacian(xi, log_q_lambda)  # (d_x,), scalar
         return w2_i * (score @ score) + 2.0 * (grad_w2_i @ score) + 2.0 * w2_i * lap
 

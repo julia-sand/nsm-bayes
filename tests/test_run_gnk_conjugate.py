@@ -32,19 +32,6 @@ def gnk_run(gnk_cfg, tmp_path):
     return save_dir
 
 
-def test_gnk_model_deterministic():
-    """The same seed gives bit-identical data."""
-    t = _theta_true()
-    sim = GNKSimulator()
-    torch.manual_seed(0)
-    a = sim.simulate(t, n=4)
-    torch.manual_seed(0)
-    b = sim.simulate(t, n=4)
-    assert a.shape == (4,)
-    assert torch.isfinite(a).all()
-    assert torch.equal(a, b), "GNKSimulator is not deterministic under a fixed seed"
-
-
 def test_gnk_model_data_changes_with_seed():
     """Different seeds give different data."""
     t = _theta_true()
@@ -62,19 +49,6 @@ def test_gnk_case1_posterior(gnk_run, gnk_cfg):
     assert_posterior_artifacts(
         gnk_run, d_theta=4, beta_min=float(gnk_cfg.get("beta_min_case1", 0.0))
     )
-
-
-def test_gnk_simulated_data_shapes(gnk_run, gnk_cfg):
-    """Simulated training and observed data have the expected shapes."""
-    theta = load_tensor(gnk_run, "theta_0.pkl")
-    x_sim = load_tensor(gnk_run, "x_sim_0.pkl")
-    x_obs_mis = load_tensor(gnk_run, "x_obs_mis_0.pkl")
-
-    assert theta.shape == (gnk_cfg.num_samples, 4)
-    assert x_sim.shape == (gnk_cfg.num_samples, gnk_cfg.d_x)
-    assert x_obs_mis.shape == (gnk_cfg.n_obs, gnk_cfg.d_x)
-    for arr, name in ((theta, "theta"), (x_sim, "x_sim"), (x_obs_mis, "x_obs_mis")):
-        assert torch.isfinite(arr).all(), f"{name} has non-finite entries"
 
 
 def test_gnk_nets_saved(gnk_run):

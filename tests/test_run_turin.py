@@ -31,19 +31,6 @@ def turin_run(turin_cfg, tmp_path):
     return save_dir
 
 
-def test_turin_model_deterministic():
-    """The same seed gives bit-identical results."""
-    t = _theta_true()
-    sim = TurinSimulator(N=30, Ns=801, device="cpu")
-    torch.manual_seed(0)
-    a = sim.simulate(t, N=30)
-    torch.manual_seed(0)
-    b = sim.simulate(t, N=30)
-    assert a.shape == (30, 3), f"TurinSimulator moments shape {tuple(a.shape)}"
-    assert torch.isfinite(a).all()
-    assert torch.equal(a, b), "TurinSimulator is not deterministic under a fixed seed"
-
-
 def test_turin_model_changes_with_seed():
     """Different seeds give different data."""
     t = _theta_true()

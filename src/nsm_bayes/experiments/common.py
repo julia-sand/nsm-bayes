@@ -151,9 +151,9 @@ def run_normflow_methods(
 
     # save the posterior moments of the calibrated general samples
     if samples_sm_general.ndim == 2 and samples_sm_general.shape[0] > 1:
-        mu_hat, Sigma_hat = estimate_stats(samples_sm_general, cfg.robust_flag)
+        mu_hat, Sigma_hat_inv = estimate_stats(samples_sm_general, cfg.robust_flag)
         save(save_dir, "posterior_mean", rep, mu_hat)
-        save(save_dir, "posterior_covariance", rep, Sigma_hat)
+        save(save_dir, "posterior_covariance", rep, sigma_inverse(Sigma_hat_inv))
 
 
 def run_conjugate_method(
