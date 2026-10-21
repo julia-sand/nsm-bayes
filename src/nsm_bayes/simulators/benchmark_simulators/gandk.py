@@ -121,7 +121,7 @@ class GandKSimulator:
             Tuple of (theta, x_sim).
         """
         theta = self.prior.sample((n,))
-        x_sim = self.simulate(theta, n=1)
+        x_sim = self.simulate(theta, n=1).unsqueeze(-1)
         return theta, x_sim
 
     def sample_gandk_fully_reparameterized(

@@ -66,7 +66,7 @@ class SIRSimulator:
             self.prior_mean = prior_mean
         else:
             self.prior_mean = torch.tensor([0.5, 0.2, 0.5, 20.0], dtype=torch.float32)
-        #self.prior_mean = self.to_constrained(self.prior_mean)
+        self.prior_mean = self.to_constrained(self.prior_mean)
 
         if prior_cov is not None:
             self.prior_cov = prior_cov
