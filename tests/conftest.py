@@ -180,7 +180,8 @@ class _StubNLE:
         # autograd graph also touches a leaf, matching the real SNLE surface
         return logp + self._param * 0.0
 
-    def build_posterior(self, sample_with: str = "mcmc", mcmc_method: str = "slice_np"):
+    def build_posterior(self, density_estimator=None, prior=None,
+                        sample_with: str = "mcmc", mcmc_method: str = "slice_np"):
         """Return a posterior stub whose ``.sample`` draws from the prior.
 
         The stub ignores all MCMC-specific kwargs (``num_chains``, ``thin``,

@@ -4,6 +4,7 @@ defaults:
   - _self_
   
 experiment_name: sir_undercounting
+theta_true: [0.6, 0.15, 0.6, 20.]
 q: 0.5
 robust_flag: false
 sr_num_samples_per_param: 8
