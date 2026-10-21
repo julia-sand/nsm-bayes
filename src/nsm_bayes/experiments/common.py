@@ -141,8 +141,7 @@ def run_normflow_methods(
         beta, history = calibrate_beta(beta_posterior, theta_samples_base, 
                                         beta_base=cfg.beta_base_general,
                                         alpha=cfg.alpha, B=cfg.B, T=cfg.T,
-                                        beta_min=cfg.get("beta_min_general", 0.01),
-                                        refresh_sampler=beta_posterior.sample)
+                                        beta_min=cfg.get("beta_min_general", 0.01))
         
         samples_sm_general = beta_posterior.sample(beta)
 

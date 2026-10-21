@@ -44,7 +44,7 @@ def build_problem(cfg: DictConfig) -> tuple:
         if "prior_cov" in cfg
         else None,
     )
-    prior = sim.prior()
+    prior = sim.prior
     return sim, prior, theta_true, cfg.d_x
 
 
@@ -75,7 +75,7 @@ def generate_data(
     ExperimentData
         Training data ``(theta, x_sim)`` and observed data; no extras.
     """
-    theta, x_sim = sim.generate_training_data(prior, cfg.num_samples)
+    theta, x_sim = sim.generate_training_data(cfg.num_samples)
     x_obs_mis = sim.generate_observed_data(
         theta_true, n_obs=cfg.n_obs, epsilon=cfg.epsilon
     )

@@ -64,25 +64,8 @@ class TurinSimulator:
         else:
             self.prior_cov = torch.eye(4, dtype=torch.float32, device=self.device)
 
-    def prior(self) -> torch.Tensor | MultivariateNormal:
-        """Return the Gaussian prior used in the Turin experiments.
+        self.prior = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
 
-        This is the prior defined in ``configs/turin.yaml`` (``prior_mean``
-        and ``prior_cov``), in the log-space parameter vector
-        ``[log(G0), log(T), log(lambda_0), log(sigma2_N)]``.
-
-        Parameters
-        ----------
-      
-        Returns
-        -------
-        torch.Tensor or MultivariateNormal
-            If `num_samples` is provided, returns a tensor of shape
-            (num_samples, 4). Otherwise, returns the prior distribution.
-        """
-        dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
-        
-        return dist
 
     def _simulate_channel(
         self, theta: torch.Tensor, epsilon: float = 0.0
@@ -181,13 +164,13 @@ class TurinSimulator:
         Returns
         -------
         torch.Tensor
-            Log temporal moments of shape (N, K), float64.
+            Log temporal moments of shape (N, K), float32.
         """
         delta_f = self.B / (self.Ns - 1)
         t_max = 1 / delta_f
         tau = torch.linspace(0, t_max, self.Ns, device=Y.device)
         n = Y.shape[0]
-        out = torch.zeros((n, K), dtype=torch.float64, device=Y.device)
+        out = torch.zeros((n, K), dtype=torch.float32, device=Y.device)
 
         for k in range(K):
             for i in range(n):
@@ -266,15 +249,12 @@ class TurinSimulator:
 
     def generate_training_data(
         self,
-        prior: MultivariateNormal,
         n: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate training data by sampling from the prior.
 
         Parameters
         ----------
-        prior : MultivariateNormal
-            Prior distribution for the log-space parameters.
         n : int
             Number of training samples; the simulator draws one batch of
             `n` receivers, each with its own theta.
@@ -285,7 +265,7 @@ class TurinSimulator:
             Tuple of (theta, x_sim), where theta is (n, d_theta) and
             x_sim is (n, K) log temporal moments.
         """
-        theta = prior.sample((n,))
+        theta = self.prior.sample((n,))
         # One batch draw: `n` receivers, each with its own theta, in a
         # single call to :meth:`simulate`.
         x_sim = self.simulate(theta, N=n)
@@ -325,7 +305,7 @@ class TurinSimulator:
         # Create noise (using a random theta or just random normal if appropriate)
         # For consistency with this model, we can sample a random theta from the prior
         if n_out > 0:
-            theta_out = self.prior.sample(num_samples=n_out)
+            theta_out = self.prior.sample((n_out,))
             x_noise = self.simulate(theta_out, N=n_out)
             x_obs[outlier_indices] = x_noise
             

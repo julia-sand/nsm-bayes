@@ -1,11 +1,6 @@
 import torch
 
-from nsm_bayes.utils.linalg import sigma_inverse
 from nsm_bayes.utils.statistics import mahalanobis_sq
-
-def mahalanobis_sq(theta_samples: torch.Tensor, mu: torch.Tensor, Sigma_inv: torch.Tensor):
-    xc = theta_samples - mu
-    return torch.sum(xc @ Sigma_inv * xc, dim=1)  # (M,)
 
 
 def multinomial_bootstrap_counts(n: int, B: int, device=None, dtype=None):

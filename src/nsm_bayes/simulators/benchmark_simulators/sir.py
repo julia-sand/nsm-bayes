@@ -74,6 +74,8 @@ class SIRSimulator:
         else:
             std = torch.tensor([0.5, 0.5, 1.0, 0.7], dtype=torch.float32)
             self.prior_cov = torch.diag(std**2)
+        
+        self.prior = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
 
 
     def to_unconstrained(self, vals: torch.Tensor) -> torch.Tensor:
@@ -253,7 +255,7 @@ class SIRSimulator:
             Tuple of (theta, observed_data, summary_stats), where theta is
             (n, d), observed_data is (n, T) and summary_stats is (n, 3).
         """
-        theta = self.prior.sample(n)
+        theta = self.prior.sample((n,))
         y = self.simulate(theta)
         #summary = self.summary(y)
         
@@ -311,25 +313,6 @@ class SIRSimulator:
 
         return y, is_contam
 
-    def prior(self,) -> torch.Tensor | MultivariateNormal:
-        """Return the Gaussian prior used in the SIR experiments.
-
-        This is the prior defined in ``configs/sir.yaml`` (``prior_mean``
-        and ``prior_std``), in the unconstrained parameter space
-        ``(log_beta, log_gamma, logit_rho, log_I0)``.
-
-        Parameters
-        ----------
-
-        Returns
-        -------
-        torch.Tensor or MultivariateNormal
-            If `num_samples` is provided, returns a tensor of shape
-            (num_samples, 4). Otherwise, returns the prior distribution.
-        """
-        dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
-        
-        return dist
 
     def apply_undercounting_trajectory(self,
         y_obs, #sampled clean data

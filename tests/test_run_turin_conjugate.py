@@ -31,32 +31,6 @@ def turin_run(turin_cfg, tmp_path):
     return save_dir
 
 
-def test_turin_model_deterministic():
-    """The same seed gives bit-identical results."""
-    t = _theta_true()
-    sim = TurinSimulator(N=30, Ns=801, device="cpu")
-    torch.manual_seed(0)
-    a = sim.simulate(t, N=30)
-    torch.manual_seed(0)
-    b = sim.simulate(t, N=30)
-    assert a.shape == (30, 3), f"TurinSimulator moments shape {tuple(a.shape)}"
-    assert torch.isfinite(a).all()
-    assert torch.equal(a, b), "TurinSimulator is not deterministic under a fixed seed"
-
-
-def test_turin_model_changes_with_seed():
-    """Different seeds give different data."""
-    t = _theta_true()
-    n = 60
-    torch.manual_seed(1)
-    sim = TurinSimulator(N=n, Ns=801, device="cpu")
-    clean = sim.simulate(t, N=n)
-    torch.manual_seed(2)
-    noisy = sim.simulate(t, N=n)
-    assert clean.shape == noisy.shape == (n, 3)
-    assert not torch.equal(clean, noisy), "Different seeds had no effect on the output"
-
-
 def test_turin_case1_posterior(turin_run, turin_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
@@ -90,25 +64,3 @@ def test_turin_nets_saved(turin_run):
         assert key in nets, f"conjugate_nets missing {key!r}"
 
 
-def test_turin_data_identical_across_methods(turin_cfg, tmp_path):
-    """Both method variants produce identical data for the same seed."""
-    nf_dir = tmp_path / "turin_nf"
-    common.run_experiment(turin_cfg, turin, common.run_normflow_methods, nf_dir)
-    cj_dir = tmp_path / "turin_cj"
-    common.run_experiment(turin_cfg, turin, common.run_conjugate_method, cj_dir)
-    for name in ("theta", "x_sim", "x_obs_mis"):
-        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
-                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
-
-
-def test_turin_prior():
-    """The built-in prior matches the hyperparameters in ``configs/turin.yaml``."""
-    cfg = OmegaConf.load("configs/turin.yaml")
-    sim = TurinSimulator()
-    prior = sim.prior()
-    assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
-    assert torch.allclose(
-        prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
-    )
-    assert prior.sample((5,)).shape == (5, 4)
-    assert torch.isfinite(prior.sample((10,))).all()

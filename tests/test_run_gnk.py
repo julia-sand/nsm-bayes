@@ -90,10 +90,10 @@ def test_gnk_prior_matches_config():
     from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
 
     cfg = OmegaConf.load("configs/gnk.yaml")
-    prior = GandKSimulator().prior()
-    assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
+    sim = GandKSimulator()
+    assert torch.allclose(sim.prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
     assert torch.allclose(
-        prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
+        sim.prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
     )
 
 
@@ -102,7 +102,7 @@ def test_gnk_simulate_shapes():
     from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
 
     sim = GandKSimulator()
-    theta = sim.prior().sample((5,))
+    theta = sim.prior.sample((5,))
     assert sim.simulate(theta).shape == (5,)
     assert sim.simulate(theta[0]).dim() == 0
     assert sim.simulate(theta[0].unsqueeze(0), n=4).shape == (4,)

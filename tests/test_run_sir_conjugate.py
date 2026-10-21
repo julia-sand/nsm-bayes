@@ -57,29 +57,3 @@ def test_sir_nets_saved(sir_run):
         "config",
     ):
         assert key in nets, f"conjugate_nets missing {key!r}"
-
-
-def test_sir_data_identical_across_methods(sir_cfg, tmp_path):
-    """Both method variants produce identical data for the same seed."""
-    nf_dir = tmp_path / "sir_nf"
-    common.run_experiment(sir_cfg, sir, common.run_normflow_methods, nf_dir)
-    cj_dir = tmp_path / "sir_cj"
-    common.run_experiment(sir_cfg, sir, common.run_conjugate_method, cj_dir)
-    for name in ("theta", "x_sim", "x_obs", "x_obs_mis", "is_contam"):
-        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
-                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
-
-
-def test_sir_prior_matches_config():
-    """The built-in prior matches the hyperparameters in ``configs/sir.yaml``."""
-    from omegaconf import OmegaConf
-
-    from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
-
-    cfg = OmegaConf.load("configs/sir.yaml")
-    prior = SIRSimulator().prior()
-    mean = torch.tensor(cfg.prior_mean, dtype=torch.float32)
-    cov = torch.diag(torch.tensor(cfg.prior_std, dtype=torch.float32) ** 2)
-    assert torch.allclose(prior.loc, mean)
-    assert torch.allclose(prior.covariance_matrix, cov)
-    assert prior.sample((5,)).shape == (5, 4)

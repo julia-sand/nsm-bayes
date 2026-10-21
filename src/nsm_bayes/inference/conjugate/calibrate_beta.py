@@ -101,8 +101,8 @@ def calibrate_beta_gpc(
             mu_boot, Sigma_boot = posterior.calibrated_posterior(x_boot, beta)
 
             # Check if theta_hat_true falls inside the credible region
-            mahalanobis_sq = mahalanobis_sq(theta_hat_true, mu_boot, Sigma_boot)
-            if mahalanobis_sq.item() <= chi2_critical_value:
+            mahalanobis_sq_val = mahalanobis_sq(theta_hat_true, mu_boot, Sigma_boot)
+            if mahalanobis_sq_val.item() <= chi2_critical_value:
                 coverage_counter += 1
 
         # --- Step 2: Evaluate the Coverage ---

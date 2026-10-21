@@ -14,8 +14,9 @@ import numpy as np
 import pytest
 import torch
 
-from nsm_bayes.gpc import calibrate_beta, calibrate_beta_gpc
-from nsm_bayes.method import sigma_inverse
+from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
+from nsm_bayes.inference.general.calibrate import calibrate_beta
+from nsm_bayes.utils.linalg import sigma_inverse
 from nsm_bayes.utils import set_seed
 
 

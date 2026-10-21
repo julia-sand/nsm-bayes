@@ -37,7 +37,7 @@ def build_problem(cfg: DictConfig) -> tuple:
     theta_true = torch.tensor(cfg.theta_true, dtype=dtype)
 
     sim = GandKSimulator(prior_mean=prior_mean, prior_cov=prior_cov)
-    prior = sim.prior()
+    prior = sim.prior
     return sim, prior, theta_true, 1
 
 

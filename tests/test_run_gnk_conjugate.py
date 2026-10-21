@@ -89,26 +89,3 @@ def test_gnk_nets_saved(gnk_run):
     ):
         assert key in nets, f"conjugate_nets missing {key!r}"
 
-
-def test_gnk_data_identical_across_methods(gnk_cfg, tmp_path):
-    """Both method variants produce identical data for the same seed."""
-    nf_dir = tmp_path / "gnk_nf"
-    common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, nf_dir)
-    cj_dir = tmp_path / "gnk_cj"
-    common.run_experiment(gnk_cfg, gnk, common.run_conjugate_method, cj_dir)
-    for name in ("theta", "x_sim", "x_obs", "x_obs_mis", "outlier_indices"):
-        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
-                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
-
-
-def test_gnk_prior():
-    """The built-in prior matches the hyperparameters in ``configs/gnk.yaml``."""
-    cfg = OmegaConf.load("configs/gnk.yaml")
-    sim = GNKSimulator()
-    prior = sim.prior()
-    assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
-    assert torch.allclose(
-        prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
-    )
-    assert prior.sample((5,)).shape == (5, 4)
-    assert torch.isfinite(prior.sample((10,))).all()

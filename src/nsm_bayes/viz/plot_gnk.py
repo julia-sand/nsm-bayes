@@ -1,32 +1,33 @@
 """
-Corner plot of the score-matching ("Ours") posterior samples for the g-and-k
-experiment, reproducing the left-hand panel of the figure (NLE omitted).
+Corner plot of the score-matching ("Ours") posterior samples, reproducing
+the left-hand panel of the figure (NLE omitted).
 
-Reads the pickles written by the g-and-k run script:
+Reads the pickles written by the normflow run scripts and resolves the data
+directory from the YAML config:
+
     data/<experiment_name>/samples_sm_general_<ind>.pkl
-and theta_true from the Hydra config (config/gnk.yaml) unless given explicitly.
+    data/<experiment_name>/eps=<epsilon>/de=<de>/samples_sm_general_<ind>.pkl
+
+The second layout is used when the config has ``epsilon`` and
+``density_estimator`` keys (e.g. the Turin experiment).
 
 Usage:
-    python plot_corner_gnk.py --ind 0
-    python plot_corner_gnk.py --experiment-name my_exp --ind 3 --out corner.pdf
-    python plot_corner_gnk.py --theta-true 3 1 2 0.5     # skip reading the config
+    python plot_gnk.py --config configs/gnk.yaml --ind 0
+    python plot_gnk.py --config configs/turin.yaml --ind 3 --out corner.pdf
 """
+
+from __future__ import annotations
 
 import argparse
 import pickle
 from pathlib import Path
 
-import numpy as np
-
-try:
-    import torch
-except ImportError:  # only needed if the pickles hold torch tensors
-    torch = None
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from omegaconf import OmegaConf
 
-# Serif / Computer Modern look without needing a LaTeX install
 plt.rcParams.update({
     "font.family": "serif",
     "mathtext.fontset": "cm",
@@ -37,20 +38,77 @@ plt.rcParams.update({
 OURS_COLOR = "#C0504D"
 
 
-def to_numpy(a):
-    if torch is not None and isinstance(a, torch.Tensor):
+def to_numpy(a) -> np.ndarray:
+    """Convert a torch tensor or array-like to a numpy array."""
+    if hasattr(a, "detach"):
         return a.detach().cpu().numpy()
     return np.asarray(a)
 
 
-def load_pickle(path):
+def load_pickle(path: Path) -> object:
+    """Load a pickled object from *path*."""
     with open(path, "rb") as f:
         return pickle.load(f)
 
 
-def load_config(config_dir, config_name):
-    from omegaconf import OmegaConf
-    return OmegaConf.load(Path(config_dir) / f"{config_name}.yaml")
+def load_config(config_path: str | Path) -> OmegaConf.DictConfig:
+    """Load a YAML config file and resolve Hydra-style ``defaults``.
+
+    If the file contains a ``defaults`` list with string entries (e.g.
+    ``- _base``), each corresponding ``<entry>.yaml`` in the same
+    directory is loaded and merged (child overrides base).
+
+    Parameters
+    ----------
+    config_path : str or Path
+        Path to the YAML config file.
+
+    Returns
+    -------
+    OmegaConf.DictConfig
+        Fully resolved configuration.
+    """
+    cfg_path = Path(config_path)
+    cfg = OmegaConf.load(cfg_path)
+    if "defaults" in cfg:
+        defaults = cfg.get("defaults")
+        if defaults:
+            resolved = []
+            for entry in defaults:
+                if isinstance(entry, str) and entry != "_self_":
+                    base_path = cfg_path.parent / f"{entry}.yaml"
+                    if base_path.exists():
+                        resolved.append(OmegaConf.load(base_path))
+            if resolved:
+                cfg = OmegaConf.merge(*resolved, cfg)
+    return cfg
+
+
+def resolve_save_dir(cfg: OmegaConf.DictConfig, data_root: str | Path) -> Path:
+    """Resolve the data directory for a config.
+
+    Standard layout:
+        data/<experiment_name>/
+    Turin-style layout (when ``epsilon`` and ``density_estimator`` are
+    present in the config):
+        data/<experiment_name>/eps=<epsilon>/de=<density_estimator>/
+
+    Parameters
+    ----------
+    cfg : OmegaConf.DictConfig
+        Resolved configuration.
+    data_root : str or Path
+        Root data directory (e.g. ``"data"``).
+
+    Returns
+    -------
+    Path
+        Directory containing the sample pickles.
+    """
+    save_dir = Path(data_root) / cfg.experiment_name
+    if "epsilon" in cfg and "density_estimator" in cfg:
+        save_dir = save_dir / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}"
+    return save_dir
 
 
 def corner_plot(samples, theta_true=None, labels=None, limits=None,
@@ -120,33 +178,27 @@ def corner_plot(samples, theta_true=None, labels=None, limits=None,
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--data-dir", default="data")
-    p.add_argument("--experiment-name", default=None,
-                   help="Defaults to experiment_name in the config.")
+    p.add_argument("--config", required=True,
+                   help="Path to the YAML config file.")
     p.add_argument("--ind", type=int, default=0, help="Repetition index.")
-    p.add_argument("--config-dir", default="config")
-    p.add_argument("--config-name", default="gnk")
-    p.add_argument("--theta-true", type=float, nargs="+", default=None)
+    p.add_argument("--data-dir", default="data")
     p.add_argument("--limits", type=float, nargs="+", default=None,
-                   help="Axis limits as lo1 hi1 lo2 hi2 ..., e.g. "
-                        "-10 3 0 3.2 -5 5 -3 0")
+                   help="Axis limits as lo1 hi1 lo2 hi2 ...")
     p.add_argument("--max-scatter", type=int, default=500)
     p.add_argument("--bins", type=int, default=30)
     p.add_argument("--out", default=None)
     args = p.parse_args()
 
-    cfg = None
-    if args.experiment_name is None or args.theta_true is None:
-        cfg = load_config(args.config_dir, args.config_name)
+    cfg = load_config(args.config)
+    save_dir = resolve_save_dir(cfg, args.data_dir)
 
-    exp_name = args.experiment_name or cfg.experiment_name
-    theta_true = (np.array(args.theta_true) if args.theta_true is not None
-                  else np.array(list(cfg.theta_true), dtype=float))
+    theta_true = np.array(list(cfg.theta_true), dtype=float)
 
-    save_dir = Path(args.data_dir) / exp_name
-    samples = to_numpy(load_pickle(save_dir / f"samples_sm_general_{args.ind}.pkl"))
+    pkl_path = save_dir / f"samples_sm_general_{args.ind}.pkl"
+    samples = to_numpy(load_pickle(pkl_path))
     d = theta_true.shape[0]
-    samples = samples.reshape(-1, d)  # flattens (chains, draws, d) if needed
+    samples = samples.reshape(-1, d)
+    print(f"Loaded {pkl_path} -> {samples.shape}")
 
     limits = None
     if args.limits is not None:

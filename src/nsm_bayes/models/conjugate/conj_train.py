@@ -6,6 +6,7 @@ import torch.optim as optim
 from torch import nn
 from torch.func import vmap
 from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.func import grad, jacfwd, vmap
 
 from nsm_bayes.utils.linalg import jacobian_and_hessian
 
@@ -124,8 +125,35 @@ def train_q_phi(  #add training params to be passed explicitly?
 
     return history
 
-
 def calculate_training_loss(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
+    """
+    Weighted score-matching loss (per-batch mean) for the exponential-family case:
+       log q(x;θ) = θᵀT(x) + b(x)
+       L(x,θ)     = ‖∇ₓ log q‖²_{Σ⁻¹} + 2 tr(Σ⁻¹ ∇²ₓ log q)
+    """
+    B, d_x = x_batch.shape
+    assert theta_batch.shape[0] == B, "Batch sizes of x and theta must match."
+
+    Sigma_inv = Sigma_inv.to(device=x_batch.device, dtype=x_batch.dtype)
+    assert Sigma_inv.shape == (d_x, d_x), "Sigma_inv must be (d_x, d_x)."
+
+    # Freeze dropout/batchnorm while keeping gradients
+    was_training_T, was_training_b = T_phi.training, b_phi.training
+    T_phi.eval()
+    b_phi.eval()
+
+    losses = vmap(single_pair_loss, in_dims=(0, 0, None, None, None))(
+        x_batch, theta_batch, T_phi, b_phi, Sigma_inv
+    )
+
+    if was_training_T:
+        T_phi.train()
+    if was_training_b:
+        b_phi.train()
+
+    return losses.mean()
+
+def calculate_training_loss1(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
     """
     Weighted score-matching loss (per-batch mean) for the exponential-family case:
        score(x;θ) = J_T(x)^T θ + ∇ b(x)
@@ -140,7 +168,6 @@ def calculate_training_loss(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
     """
     B, d_x = x_batch.shape
     assert theta_batch.shape[0] == B, "Batch sizes of x and theta must match."
-    d_theta = theta_batch.shape[1]
 
     # Ensure Σ^{-1} matches dtype/device
     Sigma_inv = Sigma_inv.to(device=x_batch.device, dtype=x_batch.dtype)
@@ -177,3 +204,24 @@ def calculate_training_loss(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
     if was_training_b: b_phi.train()
 
     return losses.mean()
+
+
+
+
+def score_with_aux(x, theta, T_phi, b_phi):
+    """∇ₓ log q, returned twice so jacfwd can give the Hessian and the score together."""
+    score = grad(log_q, argnums=0)(x, theta, T_phi, b_phi)
+    return score, score
+
+
+def log_q(x, theta, T_phi, b_phi):
+    """Unnormalized log q(x|θ) = θᵀT(x) + b(x) for a single x of shape (d_x,)."""
+    return T_phi(x) @ theta + b_phi(x).sum()
+
+
+def single_pair_loss(x, theta, T_phi, b_phi, Sigma_inv):
+    """Score-matching loss for one (x, θ) pair."""
+    H_logq, score = jacfwd(score_with_aux, argnums=0, has_aux=True)(x, theta, T_phi, b_phi)
+    score_term = score @ (Sigma_inv @ score)
+    div_term = 2.0 * torch.sum(Sigma_inv * H_logq)
+    return score_term + div_term

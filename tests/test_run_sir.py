@@ -63,9 +63,9 @@ def test_sir_prior_matches_config():
     from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 
     cfg = OmegaConf.load("configs/sir.yaml")
-    prior = SIRSimulator().prior()
+    sim = SIRSimulator()
     mean = torch.tensor(cfg.prior_mean, dtype=torch.float32)
     cov = torch.diag(torch.tensor(cfg.prior_std, dtype=torch.float32) ** 2)
-    assert torch.allclose(prior.loc, mean)
-    assert torch.allclose(prior.covariance_matrix, cov)
-    assert prior.sample((5,)).shape == (5, 4)
+    assert torch.allclose(sim.prior.loc, mean)
+    assert torch.allclose(sim.prior.covariance_matrix, cov)
+    assert sim.prior.sample((5,)).shape == (5, 4)

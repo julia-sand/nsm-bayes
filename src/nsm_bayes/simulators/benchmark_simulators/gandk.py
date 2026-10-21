@@ -60,7 +60,9 @@ class GandKSimulator:
                 ],
                 dtype=torch.float32,
             )
-
+        self.prior = MultivariateNormal(loc=self.prior_mean, 
+                                            covariance_matrix=prior_cov)
+    
     def simulate(
         self,
         theta: torch.Tensor,
@@ -99,7 +101,6 @@ class GandKSimulator:
 
     def generate_training_data(
         self,
-        prior: MultivariateNormal,
         n: int,
         **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -119,7 +120,7 @@ class GandKSimulator:
         tuple[torch.Tensor, torch.Tensor]
             Tuple of (theta, x_sim).
         """
-        theta = prior.sample((n,))
+        theta = self.prior.sample((n,))
         x_sim = self.simulate(theta, n=1)
         return theta, x_sim
 
@@ -160,25 +161,6 @@ class GandKSimulator:
         x = A + B * (1 + 0.8 * term_g) * term_k * z
         return x.squeeze()
 
-
-    def prior(self, ) -> torch.Tensor | MultivariateNormal:
-        """Return the Gaussian prior used in the gnk experiments.
-
-        Parameters
-        ----------
-        num_samples : int or None, default None
-            If provided, returns `num_samples` samples from the prior.
-            If None, returns the MultivariateNormal distribution object.
-
-        Returns
-        -------
-        torch.Tensor or MultivariateNormal
-            If `num_samples` is provided, returns a tensor of shape
-            (num_samples, 4). Otherwise, returns the prior distribution.
-        """
-        dist = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
-        
-        return dist
     def generate_observed_data(
         self,
         theta: torch.Tensor,
@@ -208,7 +190,7 @@ class GandKSimulator:
         outlier_indices = torch.randperm(n_obs)[:n_out]
         
         if n_out > 0:
-            theta_out = self.prior.sample(num_samples=n_out)
+            theta_out = self.prior.sample((n_out,))
             x_noise = self.simulate(theta_out, n=1).squeeze(-1)
             x_obs[outlier_indices] = x_noise
             

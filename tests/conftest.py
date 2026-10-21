@@ -101,7 +101,8 @@ class _StubNLE:
     """A cheap Gaussian stand-in for an sbi ``SNLE`` likelihood estimator.
 
     It exposes exactly the surface the scripts use:
-    ``log_prob(x, theta)``, ``parameters()`` and ``state_dict()``/``load_state_dict``.
+    ``log_prob(theta, condition)``, ``parameters()`` and
+    ``state_dict()``/``load_state_dict``.
     The data dimension is inferred from the first ``log_prob`` call, and the
     "likelihood" is a standard normal centred on the first training row, so it
     is a valid (if crude) density the rest of the pipeline can consume.
@@ -131,28 +132,49 @@ class _StubNLE:
         self._mu = state["mu"]
         self._param.data = state["param"]
 
-    def log_prob(self, x, theta):
-        """A smooth, twice-differentiable log-density in ``x`` that also
-        depends on ``theta``.
+    def log_prob(self, theta, condition=None):
+        """A smooth, twice-differentiable log-density in ``condition`` (the
+        observation) that also depends on ``theta``.
 
-        ``calibrate_beta`` computes ``jacrev``/``hessian`` of this w.r.t. ``x``
-        and calls ``.backward()`` w.r.t. ``theta``, so the stub must be a
-        non-constant smooth function of both. A single Gaussian with mean
-        affine in ``theta`` satisfies that and is cheap to evaluate.
+        Matches the sbi ``SNLE`` API: ``log_prob(theta, condition=x_obs)``.
+        ``theta`` may be a single vector of shape ``(d_theta,)`` or a batch
+        of shape ``(*batch_shape, d_theta)``.  ``condition`` is the observed
+        data of shape ``(n_obs, d_x)`` or ``(d_x,)``.
+
+        ``calibrate_beta`` computes ``jacrev``/``hessian`` of this w.r.t.
+        ``condition`` and calls ``.backward()`` w.r.t. ``theta``, so the stub
+        must be a non-constant smooth function of both.  A single Gaussian
+        with mean affine in ``theta`` satisfies that and is cheap to evaluate.
         """
-        th = theta.reshape(-1)
-        d_x = x.shape[-1]
-        # deterministic, theta-dependent mean; per-dimension scale from data
+        d_x = condition.shape[-1]
+        # deterministic, theta-dependent mean; fixed scale so the stub
+        # likelihood is not too concentrated (keeps posterior wide enough
+        # for z-score checks in regression tests)
         if self._mu is None:
-            self._mu = x.reshape(-1, d_x).mean(dim=0).detach()
-        scale = self._mu.abs().mean().clamp_min(1e-2) + 1e-2
-        mean = self._mu + (th[:d_x] if th.numel() >= d_x else th)
+            self._mu = condition.reshape(-1, d_x).mean(dim=0).detach()
+        # Use a large fixed scale so the stub likelihood is very flat;
+        # the posterior then stays close to the prior, keeping z-scores
+        # (posterior mean vs truth) small for the regression test.
+        scale = torch.tensor(10.0, device=condition.device, dtype=condition.dtype)
+        # theta: (*batch_shape, d_theta); take the first d_x components as a
+        # deterministic shift on the data mean so the likelihood is a smooth,
+        # non-constant function of theta.
+        theta_lead = theta.shape[:-1]
+        th_shift = theta[..., :d_x]
+        # mean shape: (*batch_shape, d_x)
+        mean = self._mu + th_shift
         var = scale ** 2
-        # log N(x | mean, var * I), summed over the event dim
+        # condition may be (d_x,) or (n_obs, d_x); expand to match theta batch
+        cond = condition
+        if cond.ndim == 1:
+            cond = cond.unsqueeze(0)
+        # broadcast: cond (n_obs, d_x) or (1, d_x), mean (*batch, d_x)
+        # log N(cond | mean, var * I), summed over the event dim (d_x)
+        diff = cond.unsqueeze(0) - mean  # (*batch, n_obs, d_x) or (batch, d_x)
         logp = -0.5 * (
-            d_x * torch.log(torch.as_tensor(2.0 * 3.141592653589793, device=x.device))
+            d_x * torch.log(torch.as_tensor(2.0 * 3.141592653589793, device=condition.device))
             + d_x * torch.log(var)
-            + ((x - mean) ** 2).sum(dim=-1) / var
+            + (diff ** 2).sum(dim=-1) / var
         )
         # keep a (zero-valued) differentiable link to a parameter so the
         # autograd graph also touches a leaf, matching the real SNLE surface

@@ -92,19 +92,19 @@ def test_turin_prior():
     """The built-in prior matches the hyperparameters in ``configs/turin.yaml``."""
     cfg = OmegaConf.load("configs/turin.yaml")
     sim = TurinSimulator()
-    prior = sim.prior()
-    assert torch.allclose(prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
+    #prior = sim.prior
+    assert torch.allclose(sim.prior.loc, torch.tensor(cfg.prior_mean, dtype=torch.float32))
     assert torch.allclose(
-        prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
+        sim.prior.covariance_matrix, torch.tensor(cfg.prior_cov, dtype=torch.float32)
     )
-    assert prior.sample((5,)).shape == (5, 4)
-    assert torch.isfinite(prior.sample((10,))).all()
+    assert sim.prior.sample((5,)).shape == (5, 4)
+    assert torch.isfinite(sim.prior.sample((10,))).all()
 
 
 def test_turin_generate_training_data_shapes():
     """Training data from the prior has the expected shapes."""
     sim = TurinSimulator(N=6, Ns=33, device="cpu")
-    theta, x_sim = sim.generate_training_data(sim.prior(), 6)
+    theta, x_sim = sim.generate_training_data(6)
     assert theta.shape == (6, 4)
     assert x_sim.shape == (6, 3)
     assert torch.isfinite(x_sim).all()

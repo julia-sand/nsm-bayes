@@ -33,7 +33,6 @@ def calibrate_beta(posterior: GeneralPosterior,
         max_log_step: float = 0.25,
         beta_min: float = 0.01,
         ess_threshold: float = 0.3,
-        refresh_sampler: Callable[[float], torch.Tensor] | None = None,
         ) -> tuple[float, dict]:
     """
     Calibrate beta via bootstrap coverage matching for NSM-Bayes.
@@ -60,8 +59,6 @@ def calibrate_beta(posterior: GeneralPosterior,
         Lower bound for beta to prevent collapse.
     ess_threshold : float, default 0.3
         ESS-to-M ratio below which samples may be refreshed.
-    refresh_sampler : callable or None, default None
-        ``sampler(beta) -> (M, d)`` used to rejuvenate collapsed samples.
 
     Returns
     -------
@@ -152,8 +149,8 @@ def calibrate_beta(posterior: GeneralPosterior,
         ess_mean = ess.mean().item()
 
         # If weights have collapsed and we can resample, rejuvenate MCMC at new beta
-        if ess_mean < ess_threshold * M and refresh_sampler is not None:
-            theta_samples_base = refresh_sampler(current_beta)  # (M, d)
+        if ess_mean < ess_threshold * M:
+            theta_samples_base = posterior.sample(current_beta)  # (M, d)
             theta_samples_base = theta_samples_base.to(device=device, dtype=dtype)
 
             # recompute cached losses with the refreshed samples

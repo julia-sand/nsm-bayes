@@ -44,7 +44,7 @@ def build_problem(cfg: DictConfig) -> tuple:
         N=cfg.N_sir,
     )
 
-    prior = sim.prior()
+    prior = sim.prior
 
     # True parameter in unconstrained space
     theta_true_constrained = torch.tensor(cfg.theta_true, dtype=dtype).unsqueeze(0)

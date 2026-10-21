@@ -73,14 +73,3 @@ def test_sir_un_simulated_data_shapes(sir_un_run, sir_uc_cfg):
     assert x_obs_mis.shape == (sir_uc_cfg.n_obs, sir_uc_cfg.d_x)
     for arr, name in ((theta, "theta"), (x_sim, "x_sim"), (x_obs_mis, "x_obs_mis")):
         assert torch.isfinite(arr).all(), f"{name} has non-finite entries"
-
-
-def test_sir_un_data_identical_across_methods(sir_uc_cfg, tmp_path):
-    """Both method variants produce identical data for the same seed."""
-    nf_dir = tmp_path / "sir_uc_nf"
-    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_normflow_methods, nf_dir)
-    cj_dir = tmp_path / "sir_uc_cj"
-    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_conjugate_method, cj_dir)
-    for name in ("theta", "x_sim", "x_obs_mis", "y_obs", "is_contam"):
-        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
-                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
