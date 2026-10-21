@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from nsm_bayes.experiments import common, sir_undercounting
-from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
+from nsm_bayes.utils import set_seed
 from scripts.conjugate import run_sir_undercounting as run_sir_uc_conjugate
 from scripts.normflow import run_sir_undercounting
 from tests.conftest import assert_posterior_artifacts, load_tensor
@@ -31,20 +31,31 @@ def test_sir_uc_clean_trajectory_saved(sir_uc_run, sir_uc_cfg):
     assert torch.isfinite(y_obs).all()
 
 
-def test_sir_uc_undercounting_is_one_sided(sir_uc_cfg, sir_uc_run):
-    """Thinning only removes counts; un-contaminated rows are untouched."""
-    y_obs = load_tensor(sir_uc_run, "y_obs_0.pkl")
-    torch.manual_seed(123)  # same seed the script uses for ind=0
-    y_cor, is_contam = apply_undercounting_trajectory(
-        y_obs, epsilon=sir_uc_cfg.epsilon, q=sir_uc_cfg.q, per_time=False
-    )
-    if is_contam.any():
-        # contaminated trajectories lose counts, never gain them
-        assert (y_cor[is_contam] <= y_obs[is_contam]).all()
-        # with q < 1 at least one contaminated trajectory shrinks
-        assert (y_cor[is_contam] < y_obs[is_contam]).any()
-    if (~is_contam).any():
-        assert torch.equal(y_cor[~is_contam], y_obs[~is_contam])
+@pytest.fixture
+def sir_uc_data(sir_uc_cfg):
+    """One repetition of the experiment's data, generated exactly as
+    ``run_experiment`` does for rep 0, without running any method."""
+    sim, prior, theta_true, d_x = sir_undercounting.build_problem(sir_uc_cfg)
+    set_seed(sir_uc_cfg.seed_offset)
+    return sir_undercounting.generate_data(sim, prior, theta_true, d_x, sir_uc_cfg)
+
+
+def test_sir_uc_undercounting_is_one_sided(sir_uc_data):
+    """Checks the corruption the experiment actually applied
+    (``SIRSimulator.apply_undercounting_trajectory``), via the summaries it
+    produced: thinning only removes counts, so attack rate and peak can only
+    drop, and un-contaminated rows are untouched."""
+    x_clean, x_cor = sir_uc_data.x_obs, sir_uc_data.x_obs_mis
+    is_contam = sir_uc_data.extras["is_contam"]
+    assert is_contam.any() and (~is_contam).any(), "seed gives a vacuous test; change the seed"
+
+    # untouched trajectories give identical summaries
+    assert torch.equal(x_cor[~is_contam], x_clean[~is_contam])
+    # attack rate (col 0) and peak (col 2) never increase under thinning ...
+    for col in (0, 2):
+        assert (x_cor[is_contam, col] <= x_clean[is_contam, col]).all()
+    # ... and with q < 1 the attack rate of some contaminated trajectory drops
+    assert (x_cor[is_contam, 0] < x_clean[is_contam, 0]).any()
 
 
 def test_sir_uc_case1_posterior(sir_uc_run, sir_uc_cfg):
