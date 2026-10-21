@@ -32,6 +32,6 @@ data/
 *.log
 
 *.patch
-AGENTS.md
 *.orig
-*.txt
+questions.txt
+*dump*
