@@ -37,10 +37,10 @@ def safe_cholesky(Sigma: torch.Tensor, max_tries: int = 6) -> torch.Tensor:
     L, info = torch.linalg.cholesky_ex(Sigma)
     if info == 0:
         return L
-    
+
     eye = torch.eye(Sigma.shape[-1], device=Sigma.device, dtype=Sigma.dtype)
 
-    jitter = 1e-8 #* scale
+    jitter = 1e-8
     for _ in range(max_tries):
         L, info = torch.linalg.cholesky_ex(Sigma + jitter * eye)
         if info == 0:
@@ -57,7 +57,7 @@ def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor
         A single variance (any tensor with one element) or a covariance
         matrix of shape ``(d, d)``.
     jitter : float, default 1e-6
-        Currently unused (see Notes); only appears in the error message.
+        Currently unused (see Notes); kept for backward compatibility.
 
     Returns
     -------
@@ -81,7 +81,8 @@ def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor
     inverted exactly.
     """
     if Sigma_hat.numel() == 1:   # scalar variance (d_x = 1)
-        var = Sigma_hat.reshape(1, 1)# + jitter
+        # Normalise (1,) or 0-d input to the documented (1, 1) output shape.
+        var = Sigma_hat.reshape(1, 1)
         if not torch.isfinite(var).all():
             raise ValueError(
                 f"Variance estimate is not finite ({var.item()}); "
@@ -89,14 +90,13 @@ def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor
             )
         if var.item() <= 0:
             raise ValueError(
-                f"Variance estimate {Sigma_hat.item():.3e} plus jitter "
-                f"{jitter:.3e} is non-positive. "
+                f"Variance estimate {var.item():.3e} is non-positive. "
                 "Data may be constant or the outlier proportion too high."
             )
         return 1.0 / var
 
     # otherwise sigma is a matrix, find the inverse
-    L = safe_cholesky(Sigma_hat) #adds jitter here
+    L = safe_cholesky(Sigma_hat)
     return torch.cholesky_inverse(L)
 
 def _single(fn):
@@ -283,10 +283,9 @@ def get_div_term_single(xi,fn,w2,grad_w2):
     """
 
     # 1. Compute Laplacian of T_phi: Tr(Hess(T_phi))
-    jac_T,lap_T  = jacobian_and_laplacian(xi,fn)
+    jac_T, lap_T = jacobian_and_laplacian(xi, fn)
 
-    #grad_w2 = grad_w2.squeeze(0)
-    
+    # grad_w2 arrives already of shape (d_x,) from the vmapped caller
     divergence = grad_w2 @ jac_T.T + w2 * lap_T
     
     return divergence
