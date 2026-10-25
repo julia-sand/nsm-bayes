@@ -34,7 +34,7 @@ src/nsm_bayes/
   experiments/common.py      ExperimentData, run_experiment, the two method steps, save/timed
   experiments/<exp>.py       build_problem(cfg) + generate_data(...) per experiment
   models/general/            GeneralModel (SNLE wrapper), GeneralPosterior, MCMCSettings
-  models/conjugate/          ConjugateModel, TphiNet/BphiNet, train_q_phi, ConjugatePosterior
+  models/conjugate/          EnergyBasedModel, TphiNet/BphiNet, train_q_phi, ConjugatePosterior
   inference/bootstrap.py     bootstrap counts, importance reweighting, coverage indicator
   inference/general/         calibrate_beta (reweighting-based), slice sampler
   inference/conjugate/       calibrate_beta_gpc (closed-form posterior per bootstrap)
@@ -110,7 +110,7 @@ iterating, and the full suite before you finish.
   per-experiment config keys.
 - **dtype.** sbi requires a `float32` prior; `GeneralModel` raises otherwise.
   Build priors/`theta_true` as `torch.float32` in `build_problem`.
-- **Units.** `ConjugateModel` standardises `x` and `θ` internally
+- **Units.** `EnergyBasedModel` standardises `x` and `θ` internally
   (`TorchStandardizer`, buffers saved in `state_dict`, `ddof=1`).
   `ConjugatePosterior` takes and returns **original units**; all
   standardise → solve → unstandardise logic stays inside it. Turin and SIR

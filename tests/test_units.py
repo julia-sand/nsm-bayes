@@ -22,7 +22,7 @@ from nsm_bayes.inference.bootstrap import (
 )
 from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
 from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.models.conjugate.conj_model import ConjugateModel
+from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
@@ -53,7 +53,7 @@ def conjugate_posteriors():
                       [0.1, 0.0, 0.4, 0.6]])
     prior = MultivariateNormal(prior_mean, scale_tril=L)
 
-    model = ConjugateModel(d_x=d_x, d_theta=d_theta, hidden_dim=16)
+    model = EnergyBasedModel(d_x=d_x, d_theta=d_theta, hidden_dim=16)
     model.standardizer_theta.fit(prior.sample((500,)))
     model.standardizer_x.fit(torch.randn(500, d_x) * 2.0 + 1.0)
 

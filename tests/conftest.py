@@ -137,7 +137,7 @@ class _StubNLE:
         """``log p(x | theta)`` under a wide Gaussian whose mean is affine in theta.
 
         Matches the sbi density-estimator API ``log_prob(input=x, condition=theta)``
-        that ``GeneralModel.log_prob`` and ``GeneralPosterior`` call.
+        that ``GeneralModel.log_prob`` delegates to.
 
         Shapes: ``x`` is ``(d_x,)`` or ``(n, d_x)``; ``theta`` is ``(d_theta,)``
         or ``(n, d_theta)``, broadcasting against ``x``'s leading dims.  Returns
@@ -194,7 +194,7 @@ def _fast_runs(monkeypatch):
     # 1) Replace the normalising-flow trainer with the Gaussian stand-in.
     monkeypatch.setattr(normflow, "SNLE", _StubNLE)
 
-    # 2) Cap the score-matching training budget. ConjugateModel.fit calls
+    # 2) Cap the score-matching training budget. EnergyBasedModel.fit calls
     #    train_q_phi with only the required args, so patching it in its own
     #    module is enough (the fit call resolves the name at runtime).
     orig_train_q_phi = conj_train.train_q_phi

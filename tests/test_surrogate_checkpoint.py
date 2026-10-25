@@ -12,7 +12,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, gnk, sir
-from nsm_bayes.models.conjugate import ConjugateModel
+from nsm_bayes.models.conjugate import EnergyBasedModel
 from nsm_bayes.models.general.normflow import GeneralModel
 from tests.conftest import load_tensor
 
@@ -21,7 +21,7 @@ METHODS = [
     pytest.param(gnk, "gnk_cfg", common.run_normflow_methods, GeneralModel,
                  "likelihood_estimator_full_0.pt", "cost_nle_training_0.pkl",
                  "samples_sm_0.pkl", id="normflow"),
-    pytest.param(sir, "sir_cfg", common.run_conjugate_method, ConjugateModel,
+    pytest.param(sir, "sir_cfg", common.run_conjugate_method, EnergyBasedModel,
                  "conjugate_nets_0.pt", "cost_sm_train_0.pkl",
                  "posterior_mean_0.pkl", id="conjugate"),
 ]

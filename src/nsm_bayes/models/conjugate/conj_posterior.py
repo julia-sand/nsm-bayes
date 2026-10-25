@@ -46,11 +46,11 @@ from nsm_bayes.utils.weights import weight_function
 from nsm_bayes.utils.statistics import estimate_stats
 
 class ConjugatePosterior():
-    """Gaussian generalised posterior for a fitted :class:`ConjugateModel`.
+    """Gaussian generalised posterior for a fitted :class:`EnergyBasedModel`.
 
     Parameters
     ----------
-    model : ConjugateModel
+    model : EnergyBasedModel
         Trained surrogate whose standardisers have been fitted.
     prior_mean : torch.Tensor
         Gaussian prior mean in original ``theta`` units, shape

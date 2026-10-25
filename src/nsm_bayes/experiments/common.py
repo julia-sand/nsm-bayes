@@ -22,7 +22,7 @@ from omegaconf import DictConfig
 
 from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
 from nsm_bayes.inference.general.calibrate import calibrate_beta
-from nsm_bayes.models.conjugate import ConjugateModel
+from nsm_bayes.models.conjugate import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.normflow import GeneralModel
 from nsm_bayes.models.general.posterior import GeneralPosterior
@@ -257,7 +257,7 @@ def run_conjugate_method(
 ) -> None:
     """Run the conjugate (score-matching) method for one repetition.
 
-    Fits a :class:`~nsm_bayes.models.conjugate.conj_model.ConjugateModel`
+    Fits a :class:`~nsm_bayes.models.conjugate.conj_model.EnergyBasedModel`
     on the simulation data, calibrates ``beta`` with GPC and computes the
     calibrated Gaussian posterior, using IMQ weights.
 
@@ -304,7 +304,7 @@ def run_conjugate_method(
     d_theta = data.theta.shape[1]
 
     #define the energy model
-    model = ConjugateModel(
+    model = EnergyBasedModel(
         d_x=cfg.d_x, d_theta=d_theta, hidden_dim=cfg.hidden_dim)
     dev = x_obs_mis.device
     model = model.to(device=dev, dtype=x_obs_mis.dtype)

@@ -133,7 +133,7 @@ class TorchStandardizer(nn.Module):
         return z * self.std + self.mean
  
  
-class ConjugateModel(nn.Module):
+class EnergyBasedModel(nn.Module):
     """Neural exponential-family surrogate ``theta^T T_phi(x) + b_phi(x)``.
 
     Parameters
@@ -175,7 +175,7 @@ class ConjugateModel(nn.Module):
         self.train_history: dict = {}
  
     # ---------------------------------------------------------------- train
-    def fit(self, x_sim: torch.Tensor, theta_sim: torch.Tensor) -> "ConjugateModel":
+    def fit(self, x_sim: torch.Tensor, theta_sim: torch.Tensor) -> "EnergyBasedModel":
         """Fit the standardisers and train the networks by score matching.
 
         The model is first moved to the device of `x_sim`. Training uses
@@ -191,7 +191,7 @@ class ConjugateModel(nn.Module):
 
         Returns
         -------
-        ConjugateModel
+        EnergyBasedModel
             ``self``, trained; the loss curves are in :attr:`train_history`.
         """
         self.to(x_sim.device)
@@ -241,7 +241,7 @@ class ConjugateModel(nn.Module):
             save_dir / f"conjugate_nets_{ind}.pt"
         )
 
-    def load_checkpoint(self, path) -> "ConjugateModel":
+    def load_checkpoint(self, path) -> "EnergyBasedModel":
         """Load networks and standardisers written by :meth:`save_checkpoint`.
 
         Parameters
@@ -252,7 +252,7 @@ class ConjugateModel(nn.Module):
 
         Returns
         -------
-        ConjugateModel
+        EnergyBasedModel
             ``self``, with weights and standardisers restored.
 
         Notes

@@ -44,7 +44,7 @@ def calibrate_beta_gpc(
         scale.
     posterior : ConjugatePosterior
         Posterior wrapping the trained
-        :class:`~nsm_bayes.models.conjugate.conj_model.ConjugateModel` and
+        :class:`~nsm_bayes.models.conjugate.conj_model.EnergyBasedModel` and
         the prior; evaluated on every bootstrap resample.
     initial_beta : float, default 0.1
         Starting value of ``beta``.
@@ -88,15 +88,6 @@ def calibrate_beta_gpc(
        where ``d = d_theta``. This gives the empirical coverage ``c_t``.
     3. Update ``log(beta) += clip(k_t * (c_t - target_coverage),
        -max_log_step, max_log_step)`` and clamp at ``log(beta_min)``.
-
-    Over-coverage therefore increases ``beta`` (sharper posterior) and
-    under-coverage decreases it.  ``theta_hat`` is
-    :meth:`ConjugatePosterior.compute_theta_hat_true` on the full data and
-    is held fixed throughout.
-
-    All quantities are in the original scale: ``ConjugatePosterior``
-    standardises internally and returns its moments in original units.
-    Progress is printed to stdout.
 
     References
     ----------
@@ -148,6 +139,8 @@ def calibrate_beta_gpc(
         # --- Step 2: Evaluate the Coverage ---
         empirical_coverage = coverage_counter / num_bootstraps
 
+        #replace with repeat on a grid  eg [0.01,0.2,0.5,..]
+        #evaluate the coverage for each beta and choose the coverage closest to target coverage .
         # --- Step 3: Update Beta using Stochastic Approximation ---
         k_t = learning_rate_fn(t)
         log_step = k_t * (empirical_coverage - target_coverage)
