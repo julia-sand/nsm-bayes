@@ -1,9 +1,8 @@
 # AGENTS.md — nsm-bayes
 
 Guidance for AI coding agents (and humans) working in this repository.
-Written against commit `968c79c` (2026-10-21, "refactor calibration loop for
-normflow method"). If the code and this file disagree, trust the code and
-update this file.
+Written against commit `3e2ccc5` (2026-10-26). If the code and this file
+disagree, trust the code and update this file.
 
 ## What this project is
 
@@ -38,28 +37,32 @@ src/nsm_bayes/
   inference/bootstrap.py     bootstrap counts, importance reweighting, coverage indicator
   inference/general/         calibrate_beta (reweighting-based), slice sampler
   inference/conjugate/       calibrate_beta_gpc (closed-form posterior per bootstrap)
-  simulators/                benchmark simulators + contamination helpers (add_noise.py)
+  simulators/                benchmark simulators, contamination helpers
+                             (add_noise.py), fromdata.py (pkl loader + Gaussian MLE)
   utils/                     linalg (sigma_inverse, safe_cholesky, jacobians),
                              statistics (robust/sample moments), weights (imq/huber/none),
                              misc (set_seed)
+  viz/plot_gnk.py            corner plot overlaying samples_sm + samples_nle_mis
 tests/                       pytest regression + unit tests (conftest has fixtures/stubs)
 examples/                    notebooks (may lag the package API)
-plot_gnk.py                  ad hoc plotting script
 ```
 
-Note: the README tree and CHANGELOG still mention `nsm_bayes.gpc`,
-`nsm_bayes.method`, `nsm_bayes.posterior`, `nsm_bayes.slice_sampler` and
-`nsm_bayes.utils.utils`. **None of these modules exist any more.** Use the
-paths above.
+Note: the **Unreleased** section of the CHANGELOG still mentions
+`nsm_bayes.gpc`, `nsm_bayes.method`, `nsm_bayes.posterior`,
+`nsm_bayes.slice_sampler` and `nsm_bayes.utils.utils`. **None of these
+modules exist any more** — those entries describe an earlier layout and need
+a cleanup pass. Use the paths above.
 
 ## Setup and commands
 
 ```bash
 # Python 3.10–3.12. numpy is pinned <2; on 3.13 nflows/antlr fail to build.
+# sbi is pinned >=0.23,<0.28: the code targets sbi 0.27 log_prob semantics.
 python -m venv .venv && source .venv/bin/activate
 python -m pip install -e . pytest
 
-# Run an experiment (results go to ./data/<experiment_name>/)
+# Run an experiment (results go to ./data/<experiment_name>/{general|conjugate}/;
+# turin adds eps=<epsilon>/de=<density_estimator> subfolders)
 python scripts/normflow/run_gnk.py num_repeat=2
 python scripts/conjugate/run_sir.py robust_flag=true
 python scripts/normflow/run_turin.py density_estimator=maf
@@ -93,8 +96,10 @@ iterating, and the full suite before you finish.
 4. **Uniform method-step interface.** `(data, prior, cfg, save_dir, rep) -> None`.
    A new script is just: pick an experiment module + a method step, call
    `common.run_experiment`. Keep scripts thin; logic belongs in `src/`.
-5. **No outputs in the repo.** Scripts write to `get_original_cwd()/data/<experiment_name>/`;
-   tests write to `tmp_path`. `data/` and `outputs/` are git-ignored.
+5. **No outputs in the repo.** Scripts write to
+   `get_original_cwd()/data/<experiment_name>/{general|conjugate}/` (turin
+   adds `eps=<epsilon>/de=<density_estimator>` subfolders); tests write to
+   `tmp_path`. `data/` and `outputs/` are git-ignored.
 
 ## Numerical conventions
 
@@ -122,8 +127,9 @@ iterating, and the full suite before you finish.
   check the gradient against autograd.
 - **Vectorise with `torch.func`** (`vmap`, `jacrev`, `jacfwd`) as the existing
   score/Laplacian code does, rather than Python loops over observations.
-- **Log-prob safety.** Flow log-probs go through `nle_log_prob_safe`
-  (clamped at `-1e10`); the slice sampler expects `-inf` outside prior support.
+- **Log-prob safety.** `GeneralModel.log_prob` clamps flow log-probs at
+  `-1e10`; `GeneralPosterior.posterior_log_prob` returns `-inf` outside the
+  prior support, which the slice sampler relies on.
 
 ## Configuration (Hydra)
 
@@ -146,11 +152,20 @@ Pickles named `<name>_<rep>.pkl` via `common.save`; timings via
 Models: `likelihood_estimator_full_<rep>.pt` (normflow),
 `conjugate_nets_<rep>.pt` (conjugate: state dicts + standardisers + config).
 
-- normflow writes: `samples_nle_mis`, `samples_sm_general`, `beta_general`,
-  `gpc_history_general`, `cost_nle_training`, `cost_nle_mcmc`, `cost_sm_general_mcmc`.
-- conjugate writes: `posterior_mean_case1`, `posterior_covariance_case1`,
-  `beta_case1`, `gpc_history_case1`, `cost_sm_case1_train`, `cost_sm_case1_posterior`.
+The per-method folder (`general` / `conjugate`) distinguishes the methods,
+so artifact names carry no method suffix.
+
+- normflow writes: `samples_nle_mis`, `samples_sm`, `beta`, `gpc_history`,
+  `posterior_mean`, `posterior_covariance` (robust moments of `samples_sm`,
+  only when more than one sample was drawn), `cost_nle_training`,
+  `cost_nle_mcmc`, `cost_sm_mcmc`.
+- conjugate writes: `posterior_mean`, `posterior_covariance`, `beta`,
+  `gpc_history`, `cost_sm_train`, `cost_sm_posterior`.
 - Both: `theta`, `x_sim`, `x_obs_mis`, (`x_obs`), plus `extras`.
+- Checkpoint resume: if `likelihood_estimator_full_<rep>.pt` or
+  `conjugate_nets_<rep>.pt` already exists in `save_dir`, training is
+  skipped and the checkpoint is loaded (no `cost_*_training` written);
+  covered by `tests/test_surrogate_checkpoint.py`.
 
 Downstream notebooks/plots load these names — renaming one is a breaking
 change and must go in the CHANGELOG.
@@ -165,13 +180,21 @@ change and must go in the CHANGELOG.
   **When you change how library code calls the flow** (method names, kwargs
   like `condition=`), update `_StubNLE` to match the real sbi surface.
 - Tests assert structure and sanity, not exact numbers: shapes, finiteness,
-  symmetric PD covariance, `β ≥ beta_min`, history keys, posterior mean within
-  3 sd of truth (gnk), cross-method data identity, determinism under a seed.
-- Write unit tests for numerical helpers against a reference
-  (e.g. `sigma_inverse` vs `inv(S + jitter·I)`), parametrised over `d=1` and
-  `d>1` — the scalar `d_x=1` path is special-cased in several helpers.
-- Test the artifacts the method under test actually writes: normflow tests
-  should check `*_general` files, conjugate tests `*_case1` files.
+  symmetric PD covariance, `β ≥ beta_min`, history keys, cross-method data
+  identity, and `test_*_model_data_changes_with_seed` (a different seed must
+  give different data).
+- `tests/test_units.py` holds known-answer unit tests: g-and-k quantiles vs
+  the closed form, SIR parameter transforms, weighted moments vs sample
+  moments, jacobians/Laplacians on quadratics vs the analytic answer, the
+  slice sampler recovering a known Gaussian, and calibration moving β the
+  right way while respecting `beta_min`.
+- Write unit tests for numerical helpers against a reference, parametrised
+  over `d=1` and `d>1` — the scalar `d_x=1` path is special-cased in several
+  helpers.
+- Test the artifacts the method under test actually writes: both methods
+  write the same names (`posterior_mean`, `posterior_covariance`, `beta`,
+  `gpc_history`) into their own save dir; `conftest.assert_posterior_artifacts`
+  is the shared structural check.
 
 ## Code style
 
@@ -199,7 +222,8 @@ change and must go in the CHANGELOG.
   running an experiment with a small config before and after and comparing
   the pickles.
 - When moving or renaming modules, update in the same change: all imports in
-  `src/`, `scripts/`, `tests/`, `examples/*.ipynb`, `plot_gnk.py`, the README
-  structure tree, and the CHANGELOG.
+  `src/`, `scripts/`, `tests/`, `examples/*.ipynb`,
+  `src/nsm_bayes/viz/plot_gnk.py`, the README structure tree, and the
+  CHANGELOG.
 - Never commit `data/`, `outputs/`, `sbi-logs/`, checkpoints or
   `__pycache__/`.

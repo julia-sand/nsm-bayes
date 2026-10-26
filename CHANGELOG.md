@@ -28,6 +28,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Added `__init__.py` to `nsm_bayes.simulators`, `nsm_bayes.simulators.benchmark_simulators`, `nsm_bayes.viz` and `nsm_bayes.inference.conjugate`. They were namespace packages, so a non-editable `pip install .` (setuptools `find_packages`) silently omitted them from the wheel; editable installs were unaffected.
+
 - **Behaviour change:** `GeneralPosterior._per_x_sm_loss` called the raw estimator as `self.flow.estimator.log_prob(xi, theta).reshape(1)` with `xi` of shape `(d_x,)` and a commented-out fallback. Under sbi 0.27 the flow's `log_prob` interprets the leading dimension as `sample_dim` (`(sample_dim, batch_dim)`), so a 1-D `xi` was mis-read as `sample_dim=d_x` and the broadcast against the 100-condition batch produced a `(d_x, 100)` result (400 elements for g-and-k, `d_x=4`) that the `.reshape(1)` could not flatten, raising `RuntimeError: shape '[100, 1]' is invalid for input of size 400` in `GeneralPosterior.sample` and `calibrate_beta`. The call now goes through `GeneralModel.log_prob(xi, theta_vec=theta)`, which batches `xi` to `(1, d_x)` so the estimator sees one input row per condition; the `-1e10` clamp of `GeneralModel.log_prob` also now applies to the score-matching loss, matching the NLE baseline.
 - Removed broken dead imports (`compute_posterior_case1`) that made `scripts/normflow/run_gnk.py` and `scripts/normflow/run_sir_undercounting.py` fail at import time.
 - `tests/test_run_gnk.py` loads the checkpoint written by `save_checkpoint` (`conjugate_nets_*.pt`).

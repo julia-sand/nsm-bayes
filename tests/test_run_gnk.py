@@ -1,9 +1,9 @@
 """Regression tests for the g-and-k experiment (normflow variant).
 
-The pipeline is well-specified (clean g-and-k data plus a few additive
-outliers), so the strongest check is that the Case-1 posterior mean lands
-close to the true parameter.  The data files must also be bit-identical to
-the ones the conjugate variant writes for the same seed.
+Checks that the contamination is applied exactly as configured, that the
+posterior artifacts are present and structurally valid, and that the data
+files are bit-identical to the ones the conjugate variant writes for the
+same seed.
 """
 import pytest
 import torch
