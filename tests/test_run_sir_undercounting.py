@@ -4,8 +4,6 @@ Undercounting is one-sided (binomial thinning), so the corrupted incidence
 trajectories must never exceed the clean ones.  The tests check that
 invariant directly and that the Case-1 posterior is structurally valid.
 """
-from __future__ import annotations
-
 import pytest
 import torch
 

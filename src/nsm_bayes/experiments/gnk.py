@@ -3,8 +3,6 @@
 The misspecification is additive outliers: a fraction ``epsilon`` of the
 observed values is replaced by values from ``cfg.outlier_values``.
 """
-from __future__ import annotations
-
 import torch
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal

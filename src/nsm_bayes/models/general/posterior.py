@@ -21,8 +21,6 @@ Down-weighting outlying observations through :math:`w` makes the posterior
 robust to contamination; :math:`\beta` is chosen by
 :func:`~nsm_bayes.inference.general.calibrate.calibrate_beta`.
 """
-from __future__ import annotations
-
 import functools
 import logging
 

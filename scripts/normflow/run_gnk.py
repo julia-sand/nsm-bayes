@@ -1,6 +1,4 @@
 """Normalising-flow method for the g-and-k experiment (Hydra entry point)."""
-from __future__ import annotations
-
 from pathlib import Path
 
 import hydra

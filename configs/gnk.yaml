@@ -13,7 +13,6 @@ prior_cov: [[5.0, 0.0, 0.0, 0.0], [0.0, 0.5, 0.0, 0.0], [0.0, 0.0, 4.0, 0.0], [0
 
 theta_true: [1.0, 0.5, 1.0, -1.]
 n_obs: 100              # Number of observed data samples
-n_obs_ref: 1000         # Number of observed data samples for the reference posterior
 
 epsilon: 0.1                          # Percentage of outliers in the data
 outlier_values: [-50.0]         # Position of the outliers
@@ -36,8 +35,3 @@ hidden_dim: 128          # Hidden dimension of neural network used in case 1
 seed_offset: 1            # RNG seed = seed_offset + repeat index (gnk used ind+1)
 
 d_x: 1
-
-
-sr_num_samples_per_param: 15
-sr_num_samples_per_param_boot: 7
-sr_num_posterior_bootstrap: 200

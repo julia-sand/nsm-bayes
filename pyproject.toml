@@ -23,9 +23,6 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.package-data]
-nsm_bayes = ["config/*.yaml"]
-
 [tool.numpydoc_validation]
 # `python -m numpydoc lint $(find src/nsm_bayes -name '*.py')` checks the
 # docstrings. Skipped checks are stylistic: extended summary, See Also and

@@ -23,8 +23,6 @@ Usage:
 Plot settings are the constants below.
 """
 
-from __future__ import annotations
-
 import pickle
 import sys
 from pathlib import Path

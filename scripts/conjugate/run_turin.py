@@ -3,8 +3,6 @@
 Hydra entry point; see :mod:`nsm_bayes.experiments.turin` for the
 experiment-specific data generation.
 """
-from __future__ import annotations
-
 from pathlib import Path
 
 import hydra

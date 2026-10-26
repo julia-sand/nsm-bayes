@@ -5,14 +5,11 @@ The prior and the true parameter are expressed in the unconstrained space
 The misspecification is prior contamination: a fraction ``epsilon`` of the
 observed trajectories is simulated under parameters drawn from the prior.
 """
-from __future__ import annotations
-
 import torch
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments.common import ExperimentData
-from nsm_bayes.simulators.add_noise import simulate_contaminated_dataset
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 
 __all__ = ["build_problem", "generate_data"]
@@ -29,8 +26,7 @@ def build_problem(cfg: DictConfig) -> tuple:
     Returns
     -------
     sim : SIRSimulator
-        Simulator with the configured prior, ``T_sir``, ``N_sir`` and
-        observation model (default ``"poisson"``).
+        Simulator with the configured prior, ``T_sir`` and ``N_sir``.
     prior : torch.distributions.MultivariateNormal
         Gaussian prior in the unconstrained space. ``cfg.prior_mean`` is
         given in the constrained space and transformed; ``cfg.prior_std``
@@ -53,7 +49,6 @@ def build_problem(cfg: DictConfig) -> tuple:
     prior_cov = torch.diag(prior_std**2)
 
     sim = SIRSimulator(
-        obs_model=cfg.obs_model if "obs_model" in cfg else "poisson",
         prior_mean=prior_mean,
         prior_cov=prior_cov,
         T=cfg.T_sir,

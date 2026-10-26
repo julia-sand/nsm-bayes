@@ -1,15 +1,12 @@
 """Stochastic discrete-time SIR epidemic simulator.
 
 Parameters are handled in the unconstrained space
-``(log beta, log gamma, logit rho, log I0[, log phi])``: infection rate,
-recovery rate, reporting probability, initial number infected and, for the
-negative-binomial observation model, overdispersion.
+``(log beta, log gamma, logit rho, log I0)``: infection rate,
+recovery rate, reporting probability and initial number infected.
 """
 
-from __future__ import annotations
-
 import torch
-from torch.distributions import Binomial, MultivariateNormal, NegativeBinomial, Poisson
+from torch.distributions import Binomial, MultivariateNormal, Poisson
 
 # Small constants that only guard against division by zero / clamp bounds.
 
@@ -22,10 +19,6 @@ class SIRSimulator:
 
     Parameters
     ----------
-    obs_model : {"poisson", "negbin"}, default "poisson"
-        Observation model for reported cases. ``"negbin"`` takes effect only
-        for 5-dimensional parameters (which include ``log phi``); with 4
-        parameters observations are always Poisson.
     dt : float, default 1.0
         Length of one time step.
     prior_mean : torch.Tensor, optional
@@ -64,14 +57,12 @@ class SIRSimulator:
 
     def __init__(
         self,
-        obs_model: str = "poisson",
         dt: float = 1.0,
         prior_mean: torch.Tensor | None = None,
         prior_cov: torch.Tensor | None = None,
         T=150,
         N=1000,
     ) -> None:
-        self.obs_model = obs_model
         self.dt = dt
 
         self.T = T
@@ -95,55 +86,49 @@ class SIRSimulator:
     def to_unconstrained(self, vals: torch.Tensor) -> torch.Tensor:
         """Map constrained parameters to the unconstrained space.
 
-        ``(beta, gamma, rho, I0[, phi]) -> (log beta, log gamma, logit rho,
-        log I0[, log phi])``.
+        ``(beta, gamma, rho, I0) -> (log beta, log gamma, logit rho,
+        log I0)``.
 
         Parameters
         ----------
         vals : torch.Tensor
-            Constrained parameters of shape ``(n, d)`` with ``d`` 4 or 5.
+            Constrained parameters of shape ``(n, 4)``.
 
         Returns
         -------
         torch.Tensor
-            Unconstrained parameters of shape ``(n, d)``.
+            Unconstrained parameters of shape ``(n, 4)``.
         """
-        n, d = vals.shape
         unconstrained = torch.empty_like(vals)
         unconstrained[:, 0] = torch.log(vals[:, 0])  # beta
         unconstrained[:, 1] = torch.log(vals[:, 1])  # gamma
         unconstrained[:, 2] = torch.logit(vals[:, 2])  # rho
         unconstrained[:, 3] = torch.log(vals[:, 3])  # I0
-        if d == 5:
-            unconstrained[:, 4] = torch.log(vals[:, 4])  # phi
         return unconstrained
 
     def to_constrained(self, theta: torch.Tensor) -> torch.Tensor:
         """Map unconstrained parameters to the constrained space.
 
-        ``(log beta, log gamma, logit rho, log I0[, log phi]) -> (beta,
-        gamma, rho, I0[, phi])``. ``I0`` is rounded to an integer and
+        ``(log beta, log gamma, logit rho, log I0) -> (beta,
+        gamma, rho, I0)``. ``I0`` is rounded to an integer and
         clamped to at least 1, so this is not an exact inverse of
         :meth:`to_unconstrained`.
 
         Parameters
         ----------
         theta : torch.Tensor
-            Unconstrained parameters of shape ``(n, d)`` with ``d`` 4 or 5.
+            Unconstrained parameters of shape ``(n, 4)``.
 
         Returns
         -------
         torch.Tensor
-            Constrained parameters of shape ``(n, d)``.
+            Constrained parameters of shape ``(n, 4)``.
         """
-        n, d = theta.shape
         constrained = torch.empty_like(theta)
         constrained[:, 0] = torch.exp(theta[:, 0])  # beta
         constrained[:, 1] = torch.exp(theta[:, 1])  # gamma
         constrained[:, 2] = torch.sigmoid(theta[:, 2])  # rho
         constrained[:, 3] = torch.clamp(torch.round(torch.exp(theta[:, 3])), min=1.0)  # I0
-        if d == 5:
-            constrained[:, 4] = torch.exp(theta[:, 4])  # phi
         return constrained
 
     def simulate(
@@ -155,16 +140,13 @@ class SIRSimulator:
 
         At each step, new infections are ``Binomial(S, 1 - exp(-beta I / N
         dt))`` and recoveries ``Binomial(I, 1 - exp(-gamma dt))``. Reported
-        cases are ``Poisson(rho * new_infections)`` or, for 5-dimensional
-        parameters with ``obs_model="negbin"``, negative binomial with mean
-        ``rho * new_infections`` and dispersion ``phi``.
+        cases are ``Poisson(rho * new_infections)``.
 
         Parameters
         ----------
         theta : torch.Tensor
-            Unconstrained parameters of shape ``(n, d)``:
-            ``(log beta, log gamma, logit rho, log I0)`` for ``d == 4``, plus
-            ``log phi`` for ``d == 5``.
+            Unconstrained parameters of shape ``(n, 4)``:
+            ``(log beta, log gamma, logit rho, log I0)``.
         **kwargs
             Ignored.
 
@@ -180,7 +162,7 @@ class SIRSimulator:
             If `theta` is not 2-D.
         """
         assert theta.dim() == 2
-        n, d = theta.shape
+        n = theta.shape[0]
         device = theta.device
         dtype = theta.dtype
 
@@ -190,9 +172,6 @@ class SIRSimulator:
         gamma = params[:, 1]
         rho = params[:, 2]
         I0 = params[:, 3]
-
-        if d == 5:
-            phi = params[:, 4]
 
         # State arrays
         S = torch.empty(n, self.T + 1, device=device, dtype=dtype)
@@ -227,26 +206,17 @@ class SIRSimulator:
             # Observations: reported incident infections
             mu = (rho * new_inf).clamp_min(0.0)
 
-            if self.obs_model == "poisson" or d == 4:
-                y[:, t] = Poisson(mu).sample()
-            else:
-                # One common NegBin parameterization: mean mu, variance mu + mu^2/phi
-                #probs = (phi / (phi + mu)).clamp(0, 1 - EPS6)
-                probs = (mu / (phi + mu)).clamp(max=1 - 1e-6)
-                y[:, t] = NegativeBinomial(total_count=phi, probs=probs).sample()
+            y[:, t] = Poisson(mu).sample()
 
         return y
 
-    def summary(self, y: torch.Tensor, N: float | None = None) -> torch.Tensor:
+    def summary(self, y: torch.Tensor = None) -> torch.Tensor:
         """Summarise incidence trajectories.
 
         Parameters
         ----------
         y : torch.Tensor
             Incidence of shape ``(n, T)``.
-        N : float, optional
-            Unused; the simulator's population size ``self.N`` is always
-            used.
 
         Returns
         -------

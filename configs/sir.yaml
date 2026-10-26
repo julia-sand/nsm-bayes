@@ -14,7 +14,6 @@ prior_std: [0.5, 0.5, 1.0, 0.7]
 
 theta_true: [0.6, 0.15, 0.6, 20.]
 n_obs: 100              # Number of observed data samples
-n_obs_ref: 1000         # Number of observed data samples for the reference posterior
 
 epsilon: 0.05                          # Percentage of outliers in the data
 
@@ -38,10 +37,6 @@ alpha: 0.05              # 1-alpha credible set
 hidden_dim: 128          # Hidden dimension of neural network used in case 1
 
 d_x: 3
-
-sr_num_samples_per_param: 6
-sr_num_samples_per_param_boot: 3
-sr_num_posterior_bootstrap: 180
 
 robust_flag: false
 

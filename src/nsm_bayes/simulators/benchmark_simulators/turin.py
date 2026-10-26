@@ -8,8 +8,6 @@ with variance decaying exponentially in the delay (reverberation time
 log space: ``theta = log([G0, T, lambda_0, sigma2_N])``.
 """
 
-from __future__ import annotations
-
 import torch
 from torch.distributions import MultivariateNormal
 
@@ -76,9 +74,7 @@ class TurinSimulator:
         self.prior = MultivariateNormal(loc=self.prior_mean, covariance_matrix=self.prior_cov)
 
 
-    def _simulate_channel(
-        self, theta: torch.Tensor, epsilon: float = 0.0
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def _simulate_channel(self, theta: torch.Tensor) -> torch.Tensor:
         """Simulate the received complex frequency response.
 
         Parameters
@@ -87,16 +83,11 @@ class TurinSimulator:
             Log parameters ``[G0, T, lambda_0, sigma2_N]``: shape ``(4,)``
             (shared by ``self.N`` receivers) or ``(nRx, 4)`` (one row per
             receiver).
-        epsilon : float, default 0.0
-            Fraction of receivers, ``int(epsilon * nRx)``, whose channel is
-            set to zero so they receive noise only.
 
         Returns
         -------
         Y : torch.Tensor
             Complex frequency response of shape ``(nRx, Ns)``.
-        outlier_indices : torch.Tensor
-            Indices of the noise-only receivers (empty if none).
         """
         # batch support: theta (d_theta,) broadcasts to all nRx receivers,
         # theta (nRx, d_theta) gives each receiver its own parameters
@@ -150,16 +141,8 @@ class TurinSimulator:
             * torch.normal(0.0, std_noise.unsqueeze(-1).expand(-1, self.Ns))
         ).to(self.device)
 
-        # choose outlier receivers
-        outlier_indices = torch.empty(0, dtype=torch.long, device=self.device)
-        if epsilon > 0.0:
-            n_outliers = int(epsilon * nRx)
-            if n_outliers > 0:
-                outlier_indices = torch.randperm(nRx, device=self.device)[:n_outliers]
-                H[outlier_indices, :] = 0.0  # kill the channel, leave only noise
-
         # received freq response
-        return H + Noise, outlier_indices
+        return H + Noise
 
     def temporal_moments(
         self, Y: torch.Tensor, K: int = 3
@@ -200,8 +183,8 @@ class TurinSimulator:
         theta: torch.Tensor,
         T: int | None = None,
         **kwargs,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Simulate receivers and return summaries or the raw power profile.
+    ) -> torch.Tensor:
+        """Simulate receivers and return the log temporal moments.
 
         Parameters
         ----------
@@ -218,63 +201,24 @@ class TurinSimulator:
                 Number of receivers to return. Defaults to
                 ``theta.shape[0]`` for 2-D `theta`, else ``self.N``. Extra
                 simulated receivers are discarded.
-            ``Ns`` : int
-                Must equal ``self.Ns`` if given.
-            ``output`` : {"moments", "data"}, default "moments"
-                What to return (see Returns).
-            ``epsilon`` : float, default 0.0
-                Fraction of noise-only receivers, as in
-                :meth:`_simulate_channel`.
 
         Returns
         -------
-        torch.Tensor or tuple
-            For ``output="moments"``, the log temporal moments of shape
-            ``(N, 3)``. For ``output="data"``, a tuple
-            ``(p_dB, outlier_indices, tau)`` on the CPU: received power in dB
-            ``(N, Ns)``, the noise-only receiver indices, and the delay grid
-            ``(Ns,)``.
-
-        Raises
-        ------
-        ValueError
-            If ``Ns`` differs from ``self.Ns`` or ``output`` is unknown.
+        torch.Tensor
+            Log temporal moments of shape ``(N, 3)``.
         """
         N = kwargs.get("N")
-        Ns = kwargs.get("Ns")
-        output = kwargs.get("output", "moments")
-        epsilon = kwargs.get("epsilon", 0.0)
 
         nRx = (
             N
             if N is not None
             else (theta.shape[0] if theta.dim() == 2 else self.N)
         )
-        if Ns is not None and Ns != self.Ns:
-            raise ValueError(
-                f"Ns must match the simulator's Ns ({self.Ns}), got {Ns}"
-            )
 
-        Y, outlier_indices = self._simulate_channel(theta, epsilon=epsilon)
-
-        if output == "moments":
-            # summary over the first nRx receivers (any extra receivers
-            # only draw random numbers and are discarded)
-            Y = Y[:nRx, :]
-            return self.temporal_moments(Y)
-        elif output == "data":
-            y_td = torch.fft.ifft(Y[:nRx, :], dim=1)
-            p = torch.abs(y_td) ** 2
-            #make the eps smaller, since 1e-12 is on similar scale to data
-            p_dB = 10 * torch.log10(p.clamp_min(torch.finfo(p.dtype).tiny))
-            delta_f = self.B / (self.Ns - 1)
-            tau = torch.linspace(0, 1 / delta_f, self.Ns, device=self.device)
-            return (
-                p_dB.detach().cpu(),
-                outlier_indices.detach().cpu(),
-                tau.detach().cpu(),
-            )
-        raise ValueError(f"Unknown output {output!r}; expected 'moments' or 'data'")
+        Y = self._simulate_channel(theta)
+        # summary over the first nRx receivers (any extra receivers
+        # only draw random numbers and are discarded)
+        return self.temporal_moments(Y[:nRx, :])
 
     def generate_training_data(
         self,

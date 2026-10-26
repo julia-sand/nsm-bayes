@@ -5,8 +5,6 @@ The full pipeline is exercised end to end through
 :mod:`tests.conftest` for the fast NLE/score-matching stand-ins).
 The data files must also be bit-identical to the normflow variant's.
 """
-from __future__ import annotations
-
 import pytest
 import torch
 from omegaconf import OmegaConf

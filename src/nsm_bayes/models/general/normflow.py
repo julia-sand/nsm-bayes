@@ -12,8 +12,6 @@ autoregressive flow (``"maf"``). The trained flow is used in two ways:
 The flow architecture and training loop come from ``sbi``; this module only
 wraps them.
 """
-from __future__ import annotations
-
 import torch
 
 from sbi.inference import SNLE

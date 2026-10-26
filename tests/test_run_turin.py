@@ -4,8 +4,6 @@ The full pipeline is exercised end to end with a tiny config (see
 :mod:`tests.conftest` for the fast stand-ins).  The data files must be
 bit-identical to the conjugate variant's for the same seed.
 """
-from __future__ import annotations
-
 import pytest
 import torch
 from omegaconf import OmegaConf

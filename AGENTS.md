@@ -175,7 +175,7 @@ change and must go in the CHANGELOG.
 
 ## Code style
 
-- `from __future__ import annotations`, type hints on public functions,
+- Type hints on public functions,
   `__all__` in modules with a public API.
 - NumPy-style docstrings that state **tensor shapes** (`(n, d_x)`,
   `(M, d_theta)`) for every array argument and return. Keep docstrings in sync

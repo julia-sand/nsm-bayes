@@ -5,8 +5,6 @@ outliers), so the strongest check is that the Case-1 posterior mean lands
 close to the true parameter.  The data files must also be bit-identical to
 the ones the conjugate variant writes for the same seed.
 """
-from __future__ import annotations
-
 import pytest
 import torch
 

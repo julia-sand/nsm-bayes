@@ -4,8 +4,6 @@ The parameters live in log space.  The misspecification is noise-only
 receivers: a fraction ``epsilon`` of the receivers is replaced by
 simulations under random prior parameters.
 """
-from __future__ import annotations
-
 import torch
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal

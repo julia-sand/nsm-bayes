@@ -5,8 +5,6 @@ and a network ``fn`` that maps a batch ``(1, d_x)`` to ``(1, d_out)`` (or to
 ``(1,)`` for scalar networks such as ``b_phi``). They are written for use
 inside :func:`torch.func.vmap` over observations.
 """
-from __future__ import annotations
-
 import torch
 from torch.func import jacfwd, jacrev
 

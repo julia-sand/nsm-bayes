@@ -4,14 +4,11 @@ Reuses :func:`nsm_bayes.experiments.sir.build_problem`; the
 misspecification is one-sided undercounting of the incidence trajectories
 (binomial thinning with retention probability ``cfg.q``).
 """
-from __future__ import annotations
-
 from omegaconf import DictConfig
 from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments import sir
 from nsm_bayes.experiments.common import ExperimentData
-from nsm_bayes.simulators.add_noise import apply_undercounting_trajectory
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 
 __all__ = ["build_problem", "generate_data"]

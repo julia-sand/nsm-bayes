@@ -25,8 +25,6 @@ from torch.func import vmap
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from torch.func import grad, jacfwd, vmap
 
-from nsm_bayes.utils.linalg import jacobian_and_hessian
-
 
 # Function to train the surrogate model for the conjugate case
 def train_q_phi(  #add training params to be passed explicitly?
@@ -221,91 +219,6 @@ def calculate_training_loss(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
         b_phi.train()
 
     return losses.mean()
-
-def calculate_training_loss1(x_batch, theta_batch, T_phi, b_phi, Sigma_inv):
-    """Alternative implementation of :func:`calculate_training_loss`.
-
-    Builds the score and Hessian explicitly from the network derivatives,
-
-    ``score = J_T(x)^T theta + grad b(x)`` and
-    ``hess = sum_k theta_k hess T_k(x) + hess b(x)``,
-
-    and returns the batch mean of
-    ``score^T Sigma_inv score + 2 tr(Sigma_inv hess)``. It is not used by
-    the training loop and is kept for reference.
-
-    Parameters
-    ----------
-    x_batch : torch.Tensor
-        Data of shape ``(B, d_x)``.
-    theta_batch : torch.Tensor
-        Parameters of shape ``(B, d_theta)``.
-    T_phi : torch.nn.Module
-        Sufficient-statistic network, ``(d_x,) -> (d_theta,)``.
-    b_phi : torch.nn.Module
-        Base-measure network, ``(d_x,) -> ()``.
-    Sigma_inv : torch.Tensor
-        Metric of shape ``(d_x, d_x)``.
-
-    Returns
-    -------
-    torch.Tensor
-        Scalar mean loss over the batch.
-    """
-    B, d_x = x_batch.shape
-    assert theta_batch.shape[0] == B, "Batch sizes of x and theta must match."
-
-    # Ensure Σ^{-1} matches dtype/device
-    Sigma_inv = Sigma_inv.to(device=x_batch.device, dtype=x_batch.dtype)
-    assert Sigma_inv.shape == (d_x, d_x), "Sigma_inv must be (d_x, d_x)."
-
-    # Temporarily set eval() to freeze any dropout/bn, but keep grads
-    was_training_T, was_training_b = T_phi.training, b_phi.training
-    T_phi.eval(); b_phi.eval()
-
-    def loss_for_single_pair(xi, thetai):
-        """Score-matching loss for one ``(x, theta)`` pair.
-
-        Parameters
-        ----------
-        xi : torch.Tensor
-            Single observation of shape ``(d_x,)``.
-        thetai : torch.Tensor
-            Parameter vector of shape ``(d_theta,)``.
-
-        Returns
-        -------
-        torch.Tensor
-            Scalar loss.
-        """
-
-        J_T,H_T = jacobian_and_hessian(xi,T_phi)
-        grad_b, H_b = jacobian_and_hessian(xi,b_phi)
-
-        # score(x;θ): (d_x,)
-        score = J_T.T @ thetai + grad_b
-
-        # ∇^2 log q(x|θ) = Σ_i θ_i ∇^2 T_i(x) + ∇^2 b(x)  -> (d_x, d_x)
-        H_logq = torch.einsum('i,ijk->jk', thetai, H_T) + H_b
-
-        # score^T Σ^{-1} score
-        score_term = torch.dot(score, Sigma_inv @ score)
-
-        # 2 * tr( Σ^{-1} H_logq ) = 2 * sum(Σ^{-1} * H_logq)
-        div_term = 2.0 * torch.sum(Sigma_inv * H_logq)
-
-        return (score_term + div_term) #/ d_x
-
-    # Vectorize across batch
-    losses = vmap(loss_for_single_pair, in_dims=(0, 0))(x_batch, theta_batch)
-
-    # Restore training flags
-    if was_training_T: T_phi.train()
-    if was_training_b: b_phi.train()
-
-    return losses.mean()
-
-
 
 
 def score_with_aux(x, theta, T_phi, b_phi):

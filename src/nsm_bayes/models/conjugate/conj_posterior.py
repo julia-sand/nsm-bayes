@@ -33,9 +33,8 @@ the model and mapped back to original units.
 import torch
 from torch.func import vmap
 
+from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.utils.linalg import (
-    jacobian_and_laplacian,
-    jacobian,
     get_cov_term_single,
     get_non_div_term_single,
     sigma_inverse,
@@ -92,11 +91,11 @@ class ConjugatePosterior():
     """
 
     def __init__(self,
-                model,
-                prior_mean, 
-                prior_cov,
-                robust,
-                weight_type):
+                model: EnergyBasedModel,
+                prior_mean: torch.Tensor,
+                prior_cov: torch.Tensor,
+                robust: bool = True,
+                weight_type: str = "imq") -> None:
 
         self.model = model
         self.robust = robust
@@ -111,34 +110,9 @@ class ConjugatePosterior():
         self.prior_cov_inv = sigma_inverse(self.prior_cov_norm)
         self.prior_mean_norm = self.model.standardizer_theta(self.prior_mean)
 
-    def precompute(self, x_obs):
-        """Cache per-observation derivatives of the networks at `x_obs`.
-
-        Parameters
-        ----------
-        x_obs : torch.Tensor
-            Observed data of shape ``(n, d_x)`` in original units.
-
-        Notes
-        -----
-        Sets ``x_n`` (standardised data, ``(n, d_x)``), ``J`` (Jacobians of
-        ``T_phi``, ``(n, d_theta, d_x)``), ``lap`` (Laplacians of ``T_phi``,
-        ``(n, d_theta)``), ``JJ`` (``J J^T``, ``(n, d_theta, d_theta)``) and
-        ``h`` (``J grad b_phi``, ``(n, d_theta)``). These caches are not
-        used by the other methods of this class, which recompute what they
-        need.
-        """
-        self._x_obs = x_obs
-        self.x_n = self._normalise_input(x_obs)                              # (n, d_x)
-        J, lap = vmap(jacobian_and_laplacian, in_dims=(0, None))(self.x_n, self.model.T_phi)
-        grad_b = vmap(jacobian, in_dims=(0, None))(self.x_n, self.model.b_phi)   # (n, d_x)
-        self.J = J                                                           # (n, d_theta, d_x)
-        self.lap = lap                                                       # (n, d_theta)
-        self.JJ = J @ J.transpose(1, 2)                                      # (n, d_theta, d_theta)
-        self.h = (J @ grad_b.unsqueeze(-1)).squeeze(-1)                      # (n, d_theta)
 
 
-    def _normalise_input(self,x_obs):
+    def _normalise_input(self,x_obs: torch.Tensor) -> torch.Tensor:
         """Standardise data with the model's ``x`` standardiser.
 
         Parameters
@@ -153,7 +127,7 @@ class ConjugatePosterior():
         """
         return self.model.standardizer_x(x_obs)
 
-    def _unnormalise(self,mu_n_normalized,Sigma_n_normalized):
+    def _unnormalise(self,mu_n_normalized: torch.Tensor,Sigma_n_normalized: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Map a Gaussian from standardised to original ``theta`` units.
 
         Parameters
@@ -178,8 +152,8 @@ class ConjugatePosterior():
         return mu_n,Sigma_n
 
     def calibrated_posterior(self, 
-                x_obs, 
-                beta):
+                x_obs: torch.Tensor, 
+                beta: float) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the generalised posterior at a given ``beta``.
 
         Parameters
@@ -224,7 +198,7 @@ class ConjugatePosterior():
         return mu_n, Sigma_n
 
     #######----Function to compute posterior precision matrix for NSM-Bayes-conj----######
-    def _compute_posterior_precision_conjugate(self, x_n, beta, w2):
+    def _compute_posterior_precision_conjugate(self, x_n: torch.Tensor, beta: float, w2: torch.Tensor) -> torch.Tensor:
         """Posterior precision ``Sigma_0^{-1} + 2 * beta * A`` (standardised space).
 
         Parameters
@@ -254,7 +228,7 @@ class ConjugatePosterior():
 
         return Sigma_n_inv
 
-    def _compute_posterior_conjugate(self, x_n, beta, w2, grad_w2):
+    def _compute_posterior_conjugate(self, x_n: torch.Tensor, beta: float, w2: torch.Tensor, grad_w2: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Posterior mean and covariance in standardised space.
 
         Parameters
@@ -294,7 +268,7 @@ class ConjugatePosterior():
         
         return mu_n, Sigma_n
 
-    def _compute_A(self,x_n,w2):
+    def _compute_A(self,x_n: torch.Tensor,w2: torch.Tensor) -> torch.Tensor:
         """Quadratic coefficient ``A = sum_i w2_i J_T(x_i) J_T(x_i)^T``.
 
         Parameters
@@ -319,7 +293,7 @@ class ConjugatePosterior():
         A = (w2.view(-1, 1, 1) * batched_cov_terms).sum(dim=0)  # (d_theta, d_theta)
         return A 
 
-    def _compute_B(self,x_n,w2,grad_w2):
+    def _compute_B(self,x_n: torch.Tensor,w2: torch.Tensor,grad_w2: torch.Tensor) -> torch.Tensor:
         """Linear coefficient ``B`` of the summed score-matching loss.
 
         ``B = sum_i [w2_i J_T(x_i) grad b(x_i) + J_T(x_i) grad_w2_i

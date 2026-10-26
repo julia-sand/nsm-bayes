@@ -4,8 +4,6 @@ A second run into the same ``save_dir`` must load the saved surrogate
 instead of retraining it, leave the original training cost untouched, and
 still produce the downstream posterior artifacts.
 """
-from __future__ import annotations
-
 from unittest import mock
 
 import pytest

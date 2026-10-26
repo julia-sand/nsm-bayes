@@ -20,6 +20,11 @@ All notable changes to this project will be documented in this file.
 - `c` (IMQ weight scale) is now a default argument (`c: float = 1.0`) of `gpc.calibrate_beta` and `gpc.calibrate_beta_gpc`; the hard-coded `c_obs = 1.` / `c_boot = 1.` inside `calibrate_beta_gpc` were removed. Experiment scripts no longer define or pass `c = 1.`.
 - The inline `torch.linalg.inv(S + 1e-6 * torch.eye(...))` calls in the scripts, `gpc.py` and the example notebooks (`sir_conjugate.ipynb`, `gnk_general.ipynb`) were replaced with `sigma_inverse(S)`.
 - The dead `step_schedule=lambda t: 10.0/(t+10.)` and `learning_rate_fn=lambda t: 10.0/(t+10.)` keyword overrides in the scripts were removed; they were identical to the functions' defaults, so results are unchanged.
+- `from __future__ import annotations` was removed from every module: nothing in the repo needed it (no forward references, no `TYPE_CHECKING` imports, Python ≥ 3.10); the corresponding AGENTS.md style rule was dropped. This unmasked an invalid annotation, `timed(...) -> Generator[None]` in `experiments/common.py` (only legal because it was never evaluated), which is now `Generator[None, None, None]`. Results are unchanged.
+
+### Removed
+
+- Dead code deleted (no behaviour change for any experiment; results are bit-identical for a fixed seed): `calculate_training_loss1` (`nsm_bayes.models.conjugate.conj_train`), `add_student_t_noise`, the free functions `simulate_contaminated_dataset` and `apply_undercounting_trajectory` (`nsm_bayes.simulators.add_noise`, both duplicates of `SIRSimulator` methods that were never called), `GandKSimulator.generate_observed_data`, `ConjugatePosterior.precompute`, the Turin `simulate(output="data")` branch with its `Ns`/`epsilon`/noise-only-receiver machinery, and the SIR negative-binomial / 5-parameter branch (`obs_model`, `log phi`; the `SIRSimulator(obs_model=...)` keyword is gone — `experiments/sir.py`, `tests/test_run_sir_undercounting_conjugate.py` and `examples/sir_conjugate.ipynb` updated). Also removed: the never-read config keys `n_obs_ref` and `sr_num_samples_per_param*`, `configs/__init__.py`, and the stale `[tool.setuptools.package-data]` entry in `pyproject.toml` (it pointed at a `config/` directory that does not exist).
 
 ### Fixed
 

@@ -5,8 +5,6 @@ The full pipeline is exercised end to end through
 :mod:`tests.conftest` for the fast stand-ins).  The data files must be
 bit-identical to the normflow variant's for the same seed.
 """
-from __future__ import annotations
-
 import pytest
 import torch
 from omegaconf import OmegaConf
@@ -35,7 +33,7 @@ def sir_un_run(sir_uc_cfg, tmp_path):
 
 def test_sir_un_model_changes_with_seed():
     """Different seeds give different trajectories."""
-    sim = SIRSimulator(obs_model="poisson", T=40, N=1000)
+    sim = SIRSimulator(T=40, N=1000)
     torch.manual_seed(1)
     clean = sim.simulate(_theta_true().repeat(4, 1))
     torch.manual_seed(2)

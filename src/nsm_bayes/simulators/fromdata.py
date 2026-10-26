@@ -5,8 +5,6 @@ or anything with a ``to_numpy()`` method); arrays are converted to
 ``float32``.  Files are read with :mod:`pickle`, which can execute
 arbitrary code: only load files you trust.
 """
-from __future__ import annotations
-
 import pickle
 
 import torch

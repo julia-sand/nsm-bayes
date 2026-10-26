@@ -12,8 +12,6 @@ Parameters are handled in the unconstrained space
 :math:`\gamma = (A, \log B, g, \log k)`.
 """
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 
 import torch
@@ -213,47 +211,4 @@ class GandKSimulator:
         term_k = (1 + z**2) ** k
         x = A + B * (1 + 0.8 * term_g) * term_k * z
         return x.squeeze()
-
-    def generate_observed_data(
-        self,
-        theta: torch.Tensor,
-        n_obs: int,
-        epsilon: float = 0.0,
-    ) -> torch.Tensor:
-        """Simulate observed data with prior-contaminated samples.
-
-        Parameters
-        ----------
-        theta : torch.Tensor
-            True parameters ``[A, log(B), g, log(k)]``, shape ``(4,)``.
-        n_obs : int
-            Number of observations.
-        epsilon : float, default 0.0
-            Fraction of observations, ``floor(epsilon * n_obs)``, that are
-            replaced by samples simulated at parameters drawn from the
-            prior.
-
-        Returns
-        -------
-        torch.Tensor
-            Observed data of shape ``(n_obs,)``.
-
-        See Also
-        --------
-        nsm_bayes.simulators.add_noise.add_outliers_by_proportion :
-            The additive-outlier contamination used by the g-and-k
-            experiment.
-        """
-        theta_batch = theta.expand(n_obs, -1)
-        x_obs = self.simulate(theta_batch, n=1).squeeze(-1)
-        
-        n_out = int(torch.floor(torch.tensor(epsilon * n_obs)).item())
-        outlier_indices = torch.randperm(n_obs)[:n_out]
-        
-        if n_out > 0:
-            theta_out = self.prior.sample((n_out,))
-            x_noise = self.simulate(theta_out, n=1).squeeze(-1)
-            x_obs[outlier_indices] = x_noise
-            
-        return x_obs
 

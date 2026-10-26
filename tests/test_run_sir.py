@@ -6,8 +6,6 @@ produces structurally valid, non-negative summary statistics and a valid
 Case-1 posterior.  The data files must also be bit-identical to the ones
 the conjugate variant writes for the same seed.
 """
-from __future__ import annotations
-
 import pytest
 import torch
 

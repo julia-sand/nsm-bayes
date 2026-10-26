@@ -4,8 +4,6 @@ Each expensive result (a fitted posterior, a large simulation, an MCMC run, a
 calibration history, robust estimates) is computed once in a module-scoped
 fixture and shared by every test that checks a property of it.
 """
-from __future__ import annotations
-
 import numpy as np
 import pytest
 import torch

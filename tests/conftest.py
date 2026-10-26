@@ -15,8 +15,6 @@ tens-of-seconds range:
   ``monkeypatch.setattr`` on ``train_q_phi``'s defaults (the model passes
   only the required args, so the defaults are what get used).
 """
-from __future__ import annotations
-
 import math
 import sys
 from pathlib import Path

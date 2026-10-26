@@ -7,8 +7,6 @@ saves it and runs one method step.  All data is generated before any
 training, so the conjugate and normalising-flow variants of the same
 experiment produce bit-identical data for the same seed.
 """
-from __future__ import annotations
-
 import logging
 import pickle
 import time
@@ -98,7 +96,7 @@ def save(save_dir: Path, name: str, rep: int, obj: Any) -> None:
 
 
 @contextmanager
-def timed(save_dir: Path, name: str, rep: int) -> Generator[None]:
+def timed(save_dir: Path, name: str, rep: int) -> Generator[None, None, None]:
     """Context manager that saves the wall-clock time of its block.
 
     Parameters
