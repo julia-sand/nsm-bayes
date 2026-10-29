@@ -85,7 +85,7 @@ iterating, and the full suite before you finish.
    numbers for data inside a method step, and never reorder RNG calls inside
    `generate_data` without expecting every saved dataset to change.
 2. **Seeding.** One call to `nsm_bayes.utils.set_seed(cfg.seed_offset + rep)`
-   per repetition (seeds `random`, `numpy`, `torch`). Don't add ad hoc
+   per repetition (seeds `numpy` and `torch`). Don't add ad hoc
    `torch.manual_seed` calls in library code. `seed_offset` is 1 for gnk and
    123 for sir/sir_undercounting/turin, to reproduce historical results.
 3. **Uniform experiment interface.** Every `experiments/<exp>.py` exposes
