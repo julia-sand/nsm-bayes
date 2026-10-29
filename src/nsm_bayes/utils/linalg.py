@@ -46,7 +46,7 @@ def safe_cholesky(Sigma: torch.Tensor, max_tries: int = 6) -> torch.Tensor:
         jitter *= 10
     raise RuntimeError(f"Covariance not positive definite even with jitter {jitter:.2e}")
 
-def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor:
+def sigma_inverse(Sigma_hat: torch.Tensor) -> torch.Tensor:
     """Invert a variance or covariance matrix.
 
     Parameters
@@ -54,8 +54,6 @@ def sigma_inverse(Sigma_hat: torch.Tensor, jitter: float = 1e-6) -> torch.Tensor
     Sigma_hat : torch.Tensor
         A single variance (any tensor with one element) or a covariance
         matrix of shape ``(d, d)``.
-    jitter : float, default 1e-6
-        Currently unused (see Notes); kept for backward compatibility.
 
     Returns
     -------

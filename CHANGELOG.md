@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- `nsm_bayes.utils.set_seed(seed)`: seeds `random`, `numpy` and `torch` in one call; experiment scripts now use it with a per-experiment `seed_offset` config value (gnk: 1, sir / sir_undercounting / turin: 123).
+- `nsm_bayes.utils.set_seed(seed)`: seeds `numpy` and `torch` in one call; experiment scripts now use it with a per-experiment `seed_offset` config value (gnk: 1, sir / sir_undercounting / turin: 123).
 - `sigma_inverse` now accepts a `jitter` argument (default `1e-6`) and returns the inverse of `Sigma + jitter * I`; its broken error message (which referenced undefined names) was fixed.
 - `gpc.weighted_mean_cov` gained a `jitter` argument (default `1e-6`).
 - Small division/log safety epsilons are now named module constants in `gpc.py`, `method.py`, `turin.py`, `sir.py` and `add_noise.py`.
@@ -24,7 +24,13 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- `random.seed(seed)` from `nsm_bayes.utils.set_seed`: nothing in `src/`, `scripts/`, `tests/` or `examples/` consumes the stdlib `random` module, so seeding it changed nothing. Results are bit-identical for a fixed seed.
+
 - Dead code deleted (no behaviour change for any experiment; results are bit-identical for a fixed seed): `calculate_training_loss1` (`nsm_bayes.models.conjugate.conj_train`), `add_student_t_noise`, the free functions `simulate_contaminated_dataset` and `apply_undercounting_trajectory` (`nsm_bayes.simulators.add_noise`, both duplicates of `SIRSimulator` methods that were never called), `GandKSimulator.generate_observed_data`, `ConjugatePosterior.precompute`, the Turin `simulate(output="data")` branch with its `Ns`/`epsilon`/noise-only-receiver machinery, and the SIR negative-binomial / 5-parameter branch (`obs_model`, `log phi`; the `SIRSimulator(obs_model=...)` keyword is gone — `experiments/sir.py`, `tests/test_run_sir_undercounting_conjugate.py` and `examples/sir_conjugate.ipynb` updated). Also removed: the never-read config keys `n_obs_ref` and `sr_num_samples_per_param*`, `configs/__init__.py`, and the stale `[tool.setuptools.package-data]` entry in `pyproject.toml` (it pointed at a `config/` directory that does not exist).
+- `joblib` dependency: the slice sampler ran its chains through `joblib.Parallel(n_jobs=1)` and no caller ever overrode `n_jobs`, so `run_multivariate_slice_sampler_tuned` now loops over chains plainly and its `n_jobs` keyword is gone. Results are bit-identical for a fixed seed.
+- The `GNKSimulator` alias of `GandKSimulator` in `nsm_bayes.simulators.benchmark_simulators.simulators`; import `GandKSimulator` instead (`tests/test_run_gnk_conjugate.py` updated).
+- The unused `jitter` argument of `sigma_inverse` (it was never applied to the matrix, so behaviour is unchanged).
+- Stale `SIRSimulator` docstrings: `generate_training_data` documented three return values but returns two (`theta`, `y`); `summary`'s `y` argument no longer has a `None` default.
 
 ### Fixed
 

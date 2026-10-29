@@ -210,7 +210,7 @@ class SIRSimulator:
 
         return y
 
-    def summary(self, y: torch.Tensor = None) -> torch.Tensor:
+    def summary(self, y: torch.Tensor) -> torch.Tensor:
         """Summarise incidence trajectories.
 
         Parameters
@@ -247,7 +247,7 @@ class SIRSimulator:
 
         return torch.stack([attack, t_peak, peak], dim=1)
 
-    def generate_training_data(self,n ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def generate_training_data(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Simulate trajectories at parameters drawn from the prior.
 
         Parameters
@@ -265,9 +265,7 @@ class SIRSimulator:
         """
         theta = self.prior.sample((n,))
         y = self.simulate(theta)
-        #summary = self.summary(y)
-        
-        return theta, y #, summary
+        return theta, y
 
     def generate_contaminated_data(
         self,

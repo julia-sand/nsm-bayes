@@ -10,7 +10,7 @@ import torch
 from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, gnk
-from nsm_bayes.simulators.benchmark_simulators.simulators import GNKSimulator
+from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
 
 from tests.conftest import assert_posterior_artifacts, load_tensor
 
@@ -31,7 +31,7 @@ def gnk_run(gnk_cfg, tmp_path):
 def test_gnk_model_data_changes_with_seed():
     """Different seeds give different data."""
     t = _theta_true()
-    sim = GNKSimulator()
+    sim = GandKSimulator()
     torch.manual_seed(1)
     clean = sim.simulate(t, n=4)
     torch.manual_seed(2)

@@ -12,7 +12,6 @@ References
    705-767, 2003.
 """
 import numpy as np
-from joblib import Parallel, delayed
 
 
 def run_multivariate_slice_sampler_tuned(
@@ -20,7 +19,6 @@ def run_multivariate_slice_sampler_tuned(
     prior,
     mcmcsettings,
     initial_w=1.0,
-    n_jobs=1,
     seed=None,
 ):
     """Run several random-direction slice-sampling chains.
@@ -37,8 +35,6 @@ def run_multivariate_slice_sampler_tuned(
         Number of chains, retained samples, warm-up steps and thinning.
     initial_w : float, default 1.0
         Initial bracket width for the univariate slice steps.
-    n_jobs : int, default 1
-        Number of joblib workers (threads) that run chains in parallel.
     seed : int, optional
         If given, seeds NumPy's global RNG before sampling. The initial
         states are drawn with torch's RNG and are not affected.
@@ -71,8 +67,8 @@ def run_multivariate_slice_sampler_tuned(
 
     print(f"Running {mcmcsettings.num_chains} slice-sampler chains for {total_steps_per_chain} steps each...")
 
-    all_chains_samples_raw = Parallel(n_jobs=n_jobs, prefer="threads")(
-        delayed(_run_single_chain_multivariate_tuned)(
+    all_chains_samples_raw = [
+        _run_single_chain_multivariate_tuned(
             i,
             log_posterior_fn,
             initial_thetas[i],
@@ -81,7 +77,7 @@ def run_multivariate_slice_sampler_tuned(
             initial_w,
         )
         for i in range(mcmcsettings.num_chains)
-    )
+    ]
 
     print("All chains complete.")
 
