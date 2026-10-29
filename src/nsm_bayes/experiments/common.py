@@ -316,7 +316,7 @@ def run_conjugate_method(
         with timed(save_dir, "sm_train", rep):
             model.fit(x_sim=data.x_sim, theta_sim=data.theta)
 
-        model.save_checkpoint(cfg, save_dir, rep)
+        model.save_checkpoint(ckpt_path)
 
     posterior = ConjugatePosterior(
         model,

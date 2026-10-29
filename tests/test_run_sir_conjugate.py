@@ -34,6 +34,5 @@ def test_sir_nets_saved(sir_run):
         "B_phi_state_dict",
         "standardizer_x_state_dict",
         "standardizer_theta_state_dict",
-        "config",
     ):
         assert key in nets, f"conjugate_nets missing {key!r}"

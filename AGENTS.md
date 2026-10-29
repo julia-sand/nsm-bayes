@@ -150,7 +150,7 @@ iterating, and the full suite before you finish.
 Pickles named `<name>_<rep>.pkl` via `common.save`; timings via
 `with common.timed(save_dir, name, rep)` → `cost_<name>_<rep>.pkl`.
 Models: `likelihood_estimator_full_<rep>.pt` (normflow),
-`conjugate_nets_<rep>.pt` (conjugate: state dicts + standardisers + config).
+`conjugate_nets_<rep>.pt` (conjugate: state dicts + standardisers).
 
 The per-method folder (`general` / `conjugate`) distinguishes the methods,
 so artifact names carry no method suffix.

@@ -175,7 +175,8 @@ class EnergyBasedModel(nn.Module):
         self.train_history: dict = {}
  
     # ---------------------------------------------------------------- train
-    def fit(self, x_sim: torch.Tensor, theta_sim: torch.Tensor) -> "EnergyBasedModel":
+    def fit(self, x_sim: torch.Tensor, theta_sim: torch.Tensor,
+            save_file=None) -> "EnergyBasedModel":
         """Fit the standardisers and train the networks by score matching.
 
         The model is first moved to the device of `x_sim`. Training uses
@@ -203,21 +204,18 @@ class EnergyBasedModel(nn.Module):
             T_phi_net=self.T_phi,
             b_phi_net=self.b_phi,
         )
+        if save_file is not None:
+            self.save_checkpoint(save_file)
         return self
     
         
-    def save_checkpoint(self,cfg,save_dir,ind):
-        """Save the networks, standardisers and config to disk.
+    def save_checkpoint(self, save_file):
+        """Save the networks and standardisers to disk.
 
         Parameters
         ----------
-        cfg : Mapping
-            Experiment configuration; stored as ``dict(cfg)`` under
-            ``"config"``.
-        save_dir : pathlib.Path
-            Output directory.
-        ind : int
-            Repetition index, used in the filename.
+        save_file : str or pathlib.Path
+            Full path of the checkpoint file to write.
 
         See Also
         --------
@@ -225,10 +223,9 @@ class EnergyBasedModel(nn.Module):
 
         Notes
         -----
-        Writes ``save_dir / f"conjugate_nets_{ind}.pt"`` containing the keys
+        Writes ``save_file`` containing the keys
         ``T_phi_state_dict``, ``B_phi_state_dict``,
-        ``standardizer_x_state_dict``, ``standardizer_theta_state_dict`` and
-        ``config``. The training history is not saved.
+        ``standardizer_x_state_dict``, ``standardizer_theta_state_dict``.
         """
         # Save the trained neural nets
         torch.save({
@@ -236,9 +233,8 @@ class EnergyBasedModel(nn.Module):
             "B_phi_state_dict": self.b_phi.state_dict(),
             "standardizer_x_state_dict": self.standardizer_x.state_dict(),
             "standardizer_theta_state_dict": self.standardizer_theta.state_dict(),
-            "config": dict(cfg),
         },
-            save_dir / f"conjugate_nets_{ind}.pt"
+            save_file
         )
 
     def load_checkpoint(self, path) -> "EnergyBasedModel":
@@ -257,8 +253,8 @@ class EnergyBasedModel(nn.Module):
 
         Notes
         -----
-        The file is read with ``weights_only=False`` because it contains the
-        config dictionary, so only load checkpoints you trust.
+        The file is read with ``weights_only=False``; only load checkpoints
+        you trust.
         """
         device = next(self.parameters()).device
         ckpt = torch.load(path, map_location=device, weights_only=False)
