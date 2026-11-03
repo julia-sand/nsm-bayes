@@ -176,7 +176,8 @@ class EnergyBasedModel(nn.Module):
  
     # ---------------------------------------------------------------- train
     def fit(self, x_sim: torch.Tensor, theta_sim: torch.Tensor,
-            save_file=None) -> "EnergyBasedModel":
+            save_file=None,
+            num_epochs=1000) -> "EnergyBasedModel":
         """Fit the standardisers and train the networks by score matching.
 
         The model is first moved to the device of `x_sim`. Training uses
@@ -203,6 +204,7 @@ class EnergyBasedModel(nn.Module):
             theta=self.standardizer_theta(theta_sim),
             T_phi_net=self.T_phi,
             b_phi_net=self.b_phi,
+            num_epochs=num_epochs
         )
         if save_file is not None:
             self.save_checkpoint(save_file)
