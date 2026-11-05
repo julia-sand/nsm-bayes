@@ -88,6 +88,7 @@ class TorchStandardizer(nn.Module):
         #unbiased =True matches the old behaviour using sbi standardiser. 
         self.std.copy_(data.std(dim=0, unbiased=True).clamp_min(self.min_std))
         self.fitted.fill_(True)
+
         return self
  
     def _check(self):
@@ -287,8 +288,13 @@ class EnergyBasedModel(nn.Module):
             b_phi_net=self.b_phi,
             num_epochs=num_epochs
         )
+
+        #stop tracking gradients 
+        self.requires_grad_(False)
+
         if save_file is not None:
             self.save_checkpoint(save_file)
+
         return self
     
         
@@ -360,6 +366,9 @@ class EnergyBasedModel(nn.Module):
             ).to(device)
 
         target._load_state(ckpt, ckpt["T_phi_state_dict"]["network.0.weight"].dtype)
+        
+        #disable gradients 
+        self.requires_grad_(False) 
         return target
 
     # ------------------------------------------------------------ checkpoint
