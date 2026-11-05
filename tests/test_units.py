@@ -402,3 +402,63 @@ def test_plain_estimates_are_pulled_by_outliers(contaminated_estimates):
 def test_robust_beats_plain(contaminated_estimates):
     robust, plain = _errors(contaminated_estimates[True]), _errors(contaminated_estimates[False])
     assert robust[0] < plain[0] and robust[1] < plain[1]
+
+
+# --------------------------------------------------------------------------- #
+# 13. EnergyBasedModel built from a checkpoint alone                           #
+# --------------------------------------------------------------------------- #
+def _fitted_model(d_x: int, d_theta: int) -> EnergyBasedModel:
+    """Untrained model with both standardisers fitted on random data."""
+    torch.manual_seed(0)
+    model = EnergyBasedModel(d_x=d_x, d_theta=d_theta, hidden_dim=16)
+    model.standardizer_x.fit(torch.randn(300, d_x) * 2.0 + 1.0)
+    model.standardizer_theta.fit(torch.randn(300, d_theta) * 0.5 - 0.5)
+    return model
+
+
+@pytest.mark.parametrize("d_x,d_theta", [(1, 4), (3, 2)])
+def test_checkpoint_reconstruction(d_x, d_theta, tmp_path):
+    model = _fitted_model(d_x, d_theta)
+    path = tmp_path / "nets.pt"
+    model.save_checkpoint(path)
+
+    rebuilt = EnergyBasedModel(checkpoint=path)
+    assert (rebuilt.d_x, rebuilt.d_theta, rebuilt.hidden_dim) == (d_x, d_theta, 16)
+
+    # State dicts are identical, key for key.
+    rebuilt_sd = rebuilt.state_dict()
+    assert set(rebuilt_sd) == set(model.state_dict())
+    for key in model.state_dict():
+        assert torch.equal(rebuilt_sd[key], model.state_dict()[key])
+
+    # Identical network outputs on random input.
+    x = torch.randn(7, d_x)
+    with torch.no_grad():
+        assert torch.equal(rebuilt.T_phi(x), model.T_phi(x))
+        assert torch.equal(rebuilt.b_phi(x), model.b_phi(x))
+
+
+@pytest.mark.parametrize("d_x,d_theta", [(1, 4), (3, 2)])
+def test_checkpoint_construction_rejects_mismatched_d_x(d_x, d_theta, tmp_path):
+    path = tmp_path / "nets.pt"
+    _fitted_model(d_x, d_theta).save_checkpoint(path)
+    with pytest.raises(ValueError, match="d_x"):
+        EnergyBasedModel(checkpoint=path, d_x=d_x + 1)
+
+
+def test_construction_without_checkpoint_or_dimensions_raises():
+    with pytest.raises(ValueError):
+        EnergyBasedModel()
+
+
+@pytest.mark.parametrize("d_x,d_theta", [(1, 4), (3, 2)])
+def test_load_checkpoint_on_dims_built_model(d_x, d_theta, tmp_path):
+    model = _fitted_model(d_x, d_theta)
+    path = tmp_path / "nets.pt"
+    model.save_checkpoint(path)
+
+    loaded = EnergyBasedModel(d_x=d_x, d_theta=d_theta, hidden_dim=16)
+    loaded.load_checkpoint(path)
+    assert set(loaded.state_dict()) == set(model.state_dict())
+    for key in model.state_dict():
+        assert torch.equal(loaded.state_dict()[key], model.state_dict()[key])

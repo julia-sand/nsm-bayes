@@ -311,7 +311,7 @@ def run_conjugate_method(
     ckpt_path = save_dir / f"conjugate_nets_{rep}.pt"
     if ckpt_path.is_file():
         _log.info("Loading trained surrogate from %s; skipping training", ckpt_path)
-        model.load_checkpoint(ckpt_path)
+        model = model.load_checkpoint(ckpt_path)
     else:
         with timed(save_dir, "sm_train", rep):
             model.fit(x_sim=data.x_sim, theta_sim=data.theta)

@@ -13,12 +13,17 @@ Both ``x`` and ``theta`` are standardised before training; the fitted
 standardisers are stored on the model.
 """
 
+import logging
+from pathlib import Path
+
 import torch
 from torch import nn
 
 from nsm_bayes.models.conjugate.bphi_net import BphiNet
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
+
+_log = logging.getLogger(__name__)
 
 
 class TorchStandardizer(nn.Module):
@@ -136,29 +141,58 @@ class TorchStandardizer(nn.Module):
 class EnergyBasedModel(nn.Module):
     """Neural exponential-family surrogate ``theta^T T_phi(x) + b_phi(x)``.
 
+    The model can be constructed in two ways:
+
+    - **From dimensions** -- give ``d_x`` and ``d_theta`` (both required;
+      ``hidden_dim`` defaults to 128). The networks are freshly initialised
+      (Xavier-uniform, biases ``0.01``) and both standardisers are unfitted.
+    - **From a checkpoint** -- give ``checkpoint`` (a path written by
+      :meth:`save_checkpoint`). The dimensions and the dtype of the saved
+      weights are read from the file, so no data or config is needed. Any
+      dimensions also passed must match the checkpoint.
+
     Parameters
     ----------
-    d_x : int
-        Data (summary statistic) dimension.
-    d_theta : int
-        Parameter dimension.
-    hidden_dim : int, default 128
-        Hidden-layer width of both networks.
+    d_x : int, optional
+        Data (summary statistic) dimension. Required unless `checkpoint` is
+        given; when given together with `checkpoint` it must match the
+        checkpoint's value.
+    d_theta : int, optional
+        Parameter dimension. Same rules as `d_x`.
+    hidden_dim : int, optional
+        Hidden-layer width of both networks. Defaults to 128 when building
+        from dimensions; when `checkpoint` is given it must match the
+        checkpoint's value (or be omitted).
+    checkpoint : str or pathlib.Path, optional
+        Checkpoint file written by :meth:`save_checkpoint`. Tensors are
+        mapped to `device`.
+    device : str or torch.device, default "cpu"
+        Device the parameters are placed on.
 
-    Attributes
-    ----------
-    T_phi : TphiNet
-        Sufficient-statistic network, ``R^{d_x} -> R^{d_theta}``.
-    b_phi : BphiNet
-        Base-measure network, ``R^{d_x} -> R``.
-    standardizer_x : TorchStandardizer
-        Standardiser for the data; both networks act on standardised ``x``.
-    standardizer_theta : TorchStandardizer
-        Standardiser for the parameters; ``theta`` in the surrogate is the
-        standardised parameter.
-    train_history : dict
-        Training and validation losses from the last call to :meth:`fit`
-        (empty before training or after :meth:`load_checkpoint`).
+    Returns
+    -------
+    EnergyBasedModel
+        A model whose :attr:`d_x`, :attr:`d_theta` and :attr:`hidden_dim`
+        match the dimensions above; in checkpoint mode the weights and
+        standardiser buffers are exactly those of the file.
+
+    Raises
+    ------
+    ValueError
+        If no checkpoint is given and either dimension is missing, or if a
+        dimension passed together with a checkpoint does not match the
+        checkpoint.
+
+    Examples
+    --------
+    >>> model = EnergyBasedModel(d_x=4, d_theta=3)          # doctest: +SKIP
+    >>> model = EnergyBasedModel(checkpoint="nets.pt")       # doctest: +SKIP
+
+    Notes
+    -----
+    Built-from-dimensions models are bit-identical to the historical
+    ``EnergyBasedModel(d_x, d_theta, hidden_dim=128)`` constructor: the same
+    random numbers initialise the same weights in the same order.
 
     See Also
     --------
@@ -166,13 +200,60 @@ class EnergyBasedModel(nn.Module):
         Closed-form generalised posterior built on a fitted model.
     """
 
-    def __init__(self, d_x: int, d_theta: int, hidden_dim: int = 128):
+    def __init__(self, d_x: int | None = None, d_theta: int | None = None,
+                 hidden_dim: int | None = None,
+                 checkpoint: str | Path | None = None,
+                 device: str | torch.device = "cpu"):
         super().__init__()
-        self.T_phi = TphiNet(d_x, hidden_dim, d_theta)
-        self.b_phi = BphiNet(d_x, hidden_dim)
-        self.standardizer_x = TorchStandardizer(d_x)
-        self.standardizer_theta = TorchStandardizer(d_theta)
+        if checkpoint is not None:
+            ckpt = torch.load(checkpoint, map_location=device, weights_only=False)
+            d_x_ckpt, d_theta_ckpt, hidden_dim_ckpt = self._infer_dimensions(
+                ckpt["T_phi_state_dict"], ckpt["standardizer_theta_state_dict"]
+            )
+            for name, passed, ckpt_val in (
+                ("d_x", d_x, d_x_ckpt),
+                ("d_theta", d_theta, d_theta_ckpt),
+                ("hidden_dim", hidden_dim, hidden_dim_ckpt),
+            ):
+                if passed is not None and passed != ckpt_val:
+                    raise ValueError(
+                        f"{name}={passed!r} does not match the checkpoint "
+                        f"({name}={ckpt_val})"
+                    )
+            d_x, d_theta, hidden_dim = d_x_ckpt, d_theta_ckpt, hidden_dim_ckpt
+        else:
+            if d_x is None or d_theta is None:
+                raise ValueError(
+                    "d_x and d_theta are required when no checkpoint is given"
+                )
+            if hidden_dim is None:
+                hidden_dim = 128
+
+        self.T_phi = TphiNet(d_x, hidden_dim, d_theta).to(device)
+        self.b_phi = BphiNet(d_x, hidden_dim).to(device)
+        self.standardizer_x = TorchStandardizer(d_x).to(device)
+        self.standardizer_theta = TorchStandardizer(d_theta).to(device)
         self.train_history: dict = {}
+
+        if checkpoint is not None:
+            dtype = ckpt["T_phi_state_dict"]["network.0.weight"].dtype
+            self._load_state(ckpt, dtype)
+
+    # ------------------------------------------------------------- properties
+    @property
+    def d_x(self) -> int:
+        """Data (summary statistic) dimension, from the standardiser's mean."""
+        return int(self.standardizer_x.mean.shape[0])
+
+    @property
+    def d_theta(self) -> int:
+        """Parameter dimension, from the parameter standardiser's mean."""
+        return int(self.standardizer_theta.mean.shape[0])
+
+    @property
+    def hidden_dim(self) -> int:
+        """Hidden-layer width of both networks."""
+        return int(self.T_phi.network[0].out_features)
  
     # ---------------------------------------------------------------- train
     def fit(self, x_sim: torch.Tensor, theta_sim: torch.Tensor,
@@ -251,7 +332,10 @@ class EnergyBasedModel(nn.Module):
         Returns
         -------
         EnergyBasedModel
-            ``self``, with weights and standardisers restored.
+            ``self``, with weights and standardisers restored. If the
+            checkpoint's dimensions differ from this instance, a new
+            :class:`EnergyBasedModel` of the correct size is constructed
+            and returned instead.
 
         Notes
         -----
@@ -260,8 +344,94 @@ class EnergyBasedModel(nn.Module):
         """
         device = next(self.parameters()).device
         ckpt = torch.load(path, map_location=device, weights_only=False)
+        d_x_ckpt, d_theta_ckpt, hidden_dim = self._infer_dimensions(
+            ckpt["T_phi_state_dict"], ckpt["standardizer_theta_state_dict"]
+        )
+
+        # Compare against this instance's actual network shape. If it
+        # matches, load in place; otherwise build a fresh model of the
+        # right size (keeping the checkpoint's hidden_dim) and load there.
+        if (d_x_ckpt == self.d_x and d_theta_ckpt == self.d_theta
+                and hidden_dim == self.hidden_dim):
+            target = self
+        else:
+            target = EnergyBasedModel(
+                d_x_ckpt, d_theta_ckpt, hidden_dim
+            ).to(device)
+
+        target._load_state(ckpt, ckpt["T_phi_state_dict"]["network.0.weight"].dtype)
+        return target
+
+    # ------------------------------------------------------------ checkpoint
+    def _load_state(self, ckpt: dict, dtype: torch.dtype) -> None:
+        """Load the four state dicts of `ckpt` into this model in place.
+
+        Parameters
+        ----------
+        ckpt : dict
+            Mapping returned by ``torch.load`` of a file written by
+            :meth:`save_checkpoint`, with the keys
+            ``T_phi_state_dict``, ``B_phi_state_dict``,
+            ``standardizer_x_state_dict``, ``standardizer_theta_state_dict``.
+        dtype : torch.dtype
+            Dtype of the checkpoint's weight tensors; the loaded state is
+            cast to it, so a checkpoint saves/loads bit-identically to the
+            model that wrote it.
+        """
+        ckpt = {
+            key: {n: v.to(dtype) for n, v in state.items()}
+            for key, state in ckpt.items()
+            if isinstance(state, dict)
+        }
         self.T_phi.load_state_dict(ckpt["T_phi_state_dict"])
         self.b_phi.load_state_dict(ckpt["B_phi_state_dict"])
         self.standardizer_x.load_state_dict(ckpt["standardizer_x_state_dict"])
         self.standardizer_theta.load_state_dict(ckpt["standardizer_theta_state_dict"])
-        return self
+
+    @staticmethod
+    def _infer_dimensions(t_phi_state: dict, std_theta_state: dict
+                          ) -> tuple[int, int, int]:
+        """Infer network dimensions from a ``TphiNet`` state dict.
+
+        ``TphiNet`` is ``nn.Sequential(Linear, Tanh, Linear)``, so the
+        state dict contains exactly two 2-D weight tensors: the first has
+        shape ``(hidden_dim, d_x)`` and the second ``(d_theta, hidden_dim)``.
+
+        Parameters
+        ----------
+        t_phi_state : dict
+            State dict written for ``T_phi`` by :meth:`save_checkpoint`.
+        std_theta_state : dict
+            State dict written for ``standardizer_theta``; used as a
+            fallback for ``d_theta`` if no linear weight is found.
+
+        Returns
+        -------
+        tuple[int, int, int]
+            ``(d_x, d_theta, hidden_dim)``.
+        """
+        linears = [v for v in t_phi_state.values() if v.ndim == 2]
+        if len(linears) != 2:
+            raise ValueError(
+                f"Cannot infer T_phi dimensions: expected exactly two 2-D "
+                f"linear weights in the state dict, found {len(linears)}."
+            )
+        hidden_dim, d_x = linears[0].shape
+        d_theta = linears[1].shape[0]
+
+        # Sanity check: the two linear layers must chain.
+        if linears[1].shape[1] != hidden_dim:
+            raise ValueError(
+                "Cannot infer T_phi dimensions: linear layer shapes do not "
+                f"chain ({tuple(linears[0].shape)} -> {tuple(linears[1].shape)})."
+            )
+
+        if linears[1].shape[0] != int(std_theta_state["mean"].numel()):
+            # Warn only -- the standardiser may have been built with a
+            # different d_theta in an older checkpoint format.
+            _log.warning(
+                "Inferred d_theta=%d from T_phi weights does not match "
+                "standardizer_theta size=%d.",
+                d_theta, int(std_theta_state["mean"].numel()),
+            )
+        return d_x, d_theta, hidden_dim

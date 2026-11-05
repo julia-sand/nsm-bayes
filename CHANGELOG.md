@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `EnergyBasedModel` can now be built from a checkpoint file alone, without data or config: `EnergyBasedModel(checkpoint=path)` reads `d_x`, `d_theta` and `hidden_dim` from the saved weight shapes and the dtype of the saved weights, then loads the networks and standardisers written by `save_checkpoint`. Dimensions passed together with a checkpoint must match it (a `ValueError` naming the dimension is raised otherwise); `d_x`/`d_theta` remain required (and `hidden_dim` still defaults to 128) when no checkpoint is given. New read-only properties `d_x`, `d_theta` and `hidden_dim` expose the dimensions derived from the modules. The checkpoint format (`conjugate_nets_<rep>.pt`) and every existing call (`EnergyBasedModel(d_x=..., d_theta=..., hidden_dim=...)`, `load_checkpoint`) are unchanged, and results are bit-identical.
 - `nsm_bayes.utils.set_seed(seed)`: seeds `numpy` and `torch` in one call; experiment scripts now use it with a per-experiment `seed_offset` config value (gnk: 1, sir / sir_undercounting / turin: 123).
 - `sigma_inverse` now accepts a `jitter` argument (default `1e-6`) and returns the inverse of `Sigma + jitter * I`; its broken error message (which referenced undefined names) was fixed.
 - `gpc.weighted_mean_cov` gained a `jitter` argument (default `1e-6`).
