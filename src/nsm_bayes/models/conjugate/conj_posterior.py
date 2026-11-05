@@ -151,6 +151,7 @@ class ConjugatePosterior():
 
         return mu_n,Sigma_n
 
+    @torch.no_grad()
     def calibrated_posterior(self, 
                 x_obs: torch.Tensor, 
                 beta: float) -> tuple[torch.Tensor, torch.Tensor]:
@@ -336,7 +337,7 @@ class ConjugatePosterior():
 
         return B
 
-    
+    @torch.no_grad()
     def compute_theta_hat_true(self,
         x_obs: torch.Tensor,) -> torch.Tensor:
         """Minimiser of the score-matching loss on the observed data.

@@ -29,7 +29,7 @@ def calibrate_beta_gpc(
     num_bootstraps: int = 200,
     learning_rate_fn: Callable[[int], float] = lambda t: 10.0 / (t + 10),
     max_log_step: float = 0.25,
-    beta_min: float = 0.01,
+    beta_min: float = 1e-4,
 ) -> tuple[float, dict]:
     """Calibrate ``beta`` for the conjugate posterior by GPC.
 
