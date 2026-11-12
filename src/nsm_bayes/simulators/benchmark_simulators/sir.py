@@ -210,7 +210,7 @@ class SIRSimulator:
 
         return y
 
-    def summary(self, y: torch.Tensor) -> torch.Tensor:
+    def summary(self, y: torch.Tensor, add_noise=True) -> torch.Tensor:
         """Summarise incidence trajectories.
 
         Parameters
@@ -244,8 +244,13 @@ class SIRSimulator:
         peak = y.max(dim=1).values / float(self.N)
         t_peak = y.argmax(dim=1).to(torch.float32) / float(max(self.T - 1, 1))
 
+        summary = torch.stack([attack, t_peak, peak], dim=1)
 
-        return torch.stack([attack, t_peak, peak], dim=1)
+        if add_noise:
+            summary += torch.randn_like(summary) / float(self.N)
+            #torch.randn(size=summary.shape) 
+
+        return summary
 
     def generate_training_data(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Simulate trajectories at parameters drawn from the prior.
