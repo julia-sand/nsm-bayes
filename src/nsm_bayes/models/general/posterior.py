@@ -19,16 +19,23 @@ score-matching loss of the trained flow :math:`q(x \mid \theta)`,
 
 Down-weighting outlying observations through :math:`w` makes the posterior
 robust to contamination; :math:`\beta` is chosen by
-:func:`~nsm_bayes.inference.general.calibrate.calibrate_beta`.
+:func:`~nsm_bayes.inference.calibrate_beta.calibrate_beta`.
 """
 import functools
 import logging
+import math
 
 import numpy as np
 import torch
 from torch import Tensor
 from torch.func import vmap
 
+from nsm_bayes.inference.beta_calibration_loop import run_beta_calibration_loop
+from nsm_bayes.inference.bootstrap import (
+    bootstrap_coverage_indicator,
+    multinomial_bootstrap_counts,
+    reweight_for_bootstrap_beta,
+)
 from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
@@ -96,6 +103,14 @@ class GeneralPosterior:
         self.w2, self.grad_w2 = weight_function(
             weight_type, self.x_obs, self.mu_hat, self.Sigma_inv, c
         )
+
+        # State used by the beta-calibration steps (see prepare_calibration).
+        # None until prepare_calibration is called.
+        self.theta_hat: Tensor | None = None
+        self.theta_samples: Tensor | None = None  # (M, d_theta), current base pool
+        self.beta_base: float | None = None       # beta the pool was drawn at
+        self.ell: Tensor | None = None            # (M, n) per-observation losses
+        self.L_orig: Tensor | None = None         # (M,) mean loss per sample
 
     def _per_x_sm_loss(self, xi, w2_i, grad_w2_i, theta):
         """Weighted SM loss for one observation `xi` at one `theta`.
@@ -263,3 +278,182 @@ class GeneralPosterior:
             if step % 20 == 0 or step == num_steps - 1:
                 _log.debug("nsm_minimiser step %d | L_NSM = %.4f", step, loss.item())
         return theta.detach()
+
+    # ------------------------------------------------------------------ #
+    # Beta calibration: the two steps driven by                           #
+    # :func:`nsm_bayes.inference.calibrate_beta.calibrate_beta`.          #
+    # ------------------------------------------------------------------ #
+    def prepare_calibration(self,
+                            beta: float,
+                            alpha: float,
+                            B: int,
+                            x_obs: Tensor = None,
+                            theta_samples_base: Tensor = None,
+                            ess_threshold: float = 0.3) -> None:
+        """Set up the state used by :meth:`estimate_coverage`.
+
+        Draws the base MCMC pool with :meth:`sample` at `beta`, caches it
+        together with its per-observation losses, and computes the NSM
+        point estimate ``theta_hat`` (the reference parameter that the
+        bootstrap credible regions must cover). The cached pool is returned
+        by :meth:`theta_samples_base` on every call.
+
+        The pool cache is built without gradients (``per_x_losses`` is
+        ``no_grad``); the ``theta_hat`` minimisation runs with gradient
+        tracking enabled, as before this method was factored out of the
+        calibrator.
+
+        Parameters
+        ----------
+        beta : float
+            Value of ``beta`` at which the base pool is drawn.
+        alpha : float
+            Miscoverage level (unused by the general method).
+        B : int
+            Number of bootstrap resamples per iteration (unused by the
+            general method).
+        x_obs : torch.Tensor, optional
+            Observed data of shape ``(n, d_x)`` (unused by the general
+            method; the posterior holds its own copy).
+        theta_samples_base : torch.Tensor, optional
+            Ignored; the base pool is sampled here at `beta` instead of
+            being passed in. Present so both posterior classes share one
+            flat signature.
+        ess_threshold : float, default 0.3
+            If the mean effective sample size of the importance weights
+            falls below ``ess_threshold * M``, the pool is redrawn at the
+            current ``beta`` inside :meth:`estimate_coverage`.
+
+        Notes
+        -----
+        ``theta_hat`` is the NSM minimiser on the full data, found by
+        :meth:`compute_theta_hat_true` (200 Adam steps with learning rate
+        ``1e-2``, started from the mean of the base pool).
+        """
+        self.theta_samples = self.sample(beta)
+        self.beta_base = beta
+        self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
+        theta_init = self.theta_samples.mean(dim=0)
+        self.theta_hat = self.compute_theta_hat_true(theta_init=theta_init)
+
+    def theta_samples_base(self) -> Tensor:
+        """Base MCMC pool used for importance reweighting.
+
+        Returns the pool cached by :meth:`prepare_calibration` (redrawn
+        inside :meth:`estimate_coverage` when its importance weights
+        degenerate).
+
+        Returns
+        -------
+        torch.Tensor
+            Samples of shape ``(M, d_theta)``.
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`prepare_calibration`.
+        """
+        if self.theta_samples is None:
+            raise RuntimeError(
+                "GeneralPosterior.theta_samples_base requires "
+                "prepare_calibration to be called first"
+            )
+        return self.theta_samples
+
+    @torch.no_grad()
+    def estimate_coverage(self,
+                          beta: float,
+                          alpha: float,
+                          B: int,
+                          x_obs: Tensor = None,
+                          theta_samples_base: Tensor = None,
+                          ess_threshold: float = 0.3) -> float:
+        """Empirical bootstrap coverage at ``beta``.
+
+        Draws ``B`` multinomial bootstrap count vectors, importance-reweights
+        the cached base pool from :attr:`beta_base` to ``beta`` on each
+        resample, and returns the fraction of resamples whose weighted
+        ``1 - alpha`` ellipsoid contains ``theta_hat``.
+
+        If the mean effective sample size of the weight matrix falls below
+        ``ess_threshold * M``, the pool is redrawn at the *updated*
+        ``beta = exp(clip(log(beta) + k * (coverage - (1 - alpha)),
+        ±max_log_step))`` with the loop's step
+        ``k = 10 / (10 + B)``, and the cached samples and losses are
+        refreshed from the new pool -- the same rejuvenation the
+        calibration loop used to perform after every coverage call.
+
+        Parameters
+        ----------
+        beta : float
+            Current value of ``beta`` to evaluate the coverage at.
+        alpha : float
+            Miscoverage level; the weighted ellipsoid has nominal level
+            ``1 - alpha``.
+        B : int
+            Number of bootstrap resamples.
+        x_obs : torch.Tensor, optional
+            Observed data (unused by the general method).
+        theta_samples_base : torch.Tensor, optional
+            Ignored; the cached pool of :meth:`prepare_calibration` (see
+            :meth:`theta_samples_base`) is used instead.
+        ess_threshold : float, default 0.3
+            Rejuvenation trigger, see :meth:`prepare_calibration`.
+
+        Returns
+        -------
+        float
+            Fraction of resamples whose weighted ellipsoid covers
+            ``theta_hat``.
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`prepare_calibration`.
+        """
+        if self.theta_samples is None or self.theta_hat is None:
+            raise RuntimeError(
+                "GeneralPosterior.estimate_coverage requires "
+                "prepare_calibration to be called first"
+            )
+
+        device = self.x_obs.device
+        dtype = self.x_obs.dtype
+        M, d = self.theta_samples.shape
+        n = self.x_obs.shape[0]
+
+        # --- importance weights for each bootstrap at beta (B, M) ---
+        W = reweight_for_bootstrap_beta(
+            self.ell, self.L_orig,
+            multinomial_bootstrap_counts(n, B, device=device, dtype=dtype),
+            beta_new=beta, beta_base=self.beta_base,
+        )
+
+        # --- coverage: fraction of resamples whose weighted ellipsoid covers theta_hat ---
+        cover = sum(
+            bootstrap_coverage_indicator(
+                self.theta_samples,  # (M, d)
+                W[b],                # (M,)
+                self.theta_hat,      # (d,)
+                alpha,               # so the region has nominal level 1 - alpha
+            )
+            for b in range(B)
+        )
+        cov = cover / B
+
+        # --- ESS-gated refresh: redraw the pool when the weights degenerate ---
+        ess_mean = (1.0 / (W**2).sum(dim=1)).mean().item()
+        if ess_mean < ess_threshold * M:
+            # The loop's SA step applied to this coverage estimate.
+            k_t = 10.0 / (10 + B)
+            log_step = max(-0.25, min(0.25, k_t * (cov - (1.0 - alpha))))
+            beta_new = float(math.exp(math.log(beta) + log_step))
+            _log.debug(
+                "ESS %.3f < %.3f * %d: refreshing MCMC pool at beta %.4f",
+                ess_mean, ess_threshold, M, beta_new,
+            )
+            self.theta_samples = self.sample(beta_new).to(device=device, dtype=dtype)
+            self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
+            self.beta_base = beta_new
+
+        return cov

@@ -10,7 +10,7 @@ import torch
 from omegaconf import OmegaConf
 from torch.distributions import MultivariateNormal
 
-import nsm_bayes.inference.general.calibrate as general_calibrate
+import nsm_bayes.models.general.posterior as general_posterior
 from nsm_bayes.inference.bootstrap import (
     bootstrap_coverage_indicator,
     multinomial_bootstrap_counts,
@@ -18,7 +18,7 @@ from nsm_bayes.inference.bootstrap import (
     weighted_mean_cov,
     weighted_quantile,
 )
-from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
+from nsm_bayes.inference.calibrate_beta import calibrate_beta
 from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
@@ -297,7 +297,39 @@ class _FlatGeneralPosterior:
         return torch.zeros(self.d)
 
     def sample(self, beta):
-        raise AssertionError("weights never degenerate here, so no resampling should happen")
+        # Base-pool draw at beta_init (done once by prepare_calibration);
+        # the weights never degenerate here, so estimate_coverage must not
+        # resample.
+        if beta != BETA_START:
+            raise AssertionError("no resampling should happen at a later beta")
+        return torch.randn(50, self.d)
+
+    def prepare_calibration(self, beta, alpha, B, x_obs=None, theta_samples_base=None,
+                            ess_threshold=0.3):
+        self.theta_samples = self.sample(beta)
+        self.beta_base = beta
+        self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
+        self.theta_hat = self.compute_theta_hat_true()
+
+    def estimate_coverage(self, beta, alpha, B, x_obs=None, theta_samples_base=None,
+                          ess_threshold=0.3):
+        # Same importance-reweighted coverage step as the real method; the
+        # indicator is read from the module so tests can monkeypatch it.
+        n = self.x_obs.shape[0]
+        W = reweight_for_bootstrap_beta(
+            self.ell, self.L_orig,
+            multinomial_bootstrap_counts(n, B, device=self.x_obs.device,
+                                         dtype=self.x_obs.dtype),
+            beta_new=beta, beta_base=self.beta_base,
+        )
+        indicator = general_posterior.bootstrap_coverage_indicator
+        cover = sum(
+            indicator(self.theta_samples, W[b], self.theta_hat, alpha)
+            for b in range(B)
+        )
+        ess_mean = (1.0 / (W ** 2).sum(dim=1)).mean().item()
+        assert ess_mean >= ess_threshold * self.theta_samples.shape[0]
+        return cover / B
 
 
 class _FixedConjugatePosterior:
@@ -307,8 +339,28 @@ class _FixedConjugatePosterior:
         self.prior_mean = torch.zeros(d)
         self._theta_hat = theta_hat
 
-    def compute_theta_hat_true(self, x_obs):
-        return self._theta_hat
+    def prepare_calibration(self, beta, alpha, B, x_obs=None, theta_samples_base=None,
+                            ess_threshold=0.3):
+        self.theta_hat = self._theta_hat
+
+    def theta_samples_base(self):
+        return None
+
+    def estimate_coverage(self, beta, alpha, B, x_obs=None, theta_samples_base=None,
+                          ess_threshold=0.3):
+        from scipy.stats import chi2
+        d = len(self.prior_mean)
+        n_obs = x_obs.shape[0]
+        crit = chi2.ppf(1.0 - alpha, df=d)
+        covered = 0
+        for _ in range(B):
+            indices = torch.randint(0, n_obs, (n_obs,), device=x_obs.device)
+            x_boot = x_obs[indices]
+            mu_boot, Sigma_boot = self.calibrated_posterior(x_boot, beta)
+            from nsm_bayes.utils.statistics import mahalanobis_sq
+            if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() <= crit:
+                covered += 1
+        return covered / B
 
     def calibrated_posterior(self, x_boot, beta):
         return torch.zeros(len(self.prior_mean)), torch.eye(len(self.prior_mean))
@@ -316,18 +368,19 @@ class _FixedConjugatePosterior:
 
 def _run_general(covered: int):
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(general_calibrate, "bootstrap_coverage_indicator", lambda *a, **k: covered)
-        theta = torch.randn(50, 2)
-        _, hist = general_calibrate.calibrate_beta(
-            _FlatGeneralPosterior(), theta, beta_base=BETA_START, B=5, T=N_ITER, beta_min=BETA_MIN)
+        mp.setattr(general_posterior, "bootstrap_coverage_indicator",
+                   lambda *a, **k: covered)
+        _, hist = calibrate_beta(
+            _FlatGeneralPosterior(), beta_init=BETA_START, B=5, T=N_ITER,
+            beta_min=BETA_MIN)
     return hist
 
 
 def _run_gpc(covered: int):
     theta_hat = torch.zeros(2) if covered else torch.full((2,), 10.0)
-    _, hist = calibrate_beta_gpc(
-        torch.zeros(10, 1), _FixedConjugatePosterior(theta_hat), initial_beta=BETA_START,
-        num_iterations=N_ITER, num_bootstraps=5, beta_min=BETA_MIN)
+    _, hist = calibrate_beta(
+        _FixedConjugatePosterior(theta_hat), beta_init=BETA_START, B=5, T=N_ITER,
+        x_obs=torch.zeros(10, 1), beta_min=BETA_MIN)
     return hist
 
 

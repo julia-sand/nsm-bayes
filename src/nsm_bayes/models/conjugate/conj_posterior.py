@@ -31,6 +31,8 @@ All of this is computed in the standardised ``x`` and ``theta`` spaces of
 the model and mapped back to original units.
 """
 import torch
+from scipy.stats import chi2
+from torch import Tensor
 from torch.func import vmap
 
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
@@ -42,7 +44,7 @@ from nsm_bayes.utils.linalg import (
 )
 
 from nsm_bayes.utils.weights import weight_function
-from nsm_bayes.utils.statistics import estimate_stats
+from nsm_bayes.utils.statistics import estimate_stats, mahalanobis_sq
 
 class ConjugatePosterior():
     """Gaussian generalised posterior for a fitted :class:`EnergyBasedModel`.
@@ -80,7 +82,7 @@ class ConjugatePosterior():
 
     See Also
     --------
-    nsm_bayes.inference.conjugate.calibrate_beta.calibrate_beta_gpc :
+    nsm_bayes.inference.calibrate_beta.calibrate_beta :
         Chooses ``beta`` for :meth:`calibrated_posterior`.
 
     Notes
@@ -110,7 +112,9 @@ class ConjugatePosterior():
         self.prior_cov_inv = sigma_inverse(self.prior_cov_norm)
         self.prior_mean_norm = self.model.standardizer_theta(self.prior_mean)
 
-
+        # Point estimate used by the beta-calibration steps
+        # (see prepare_calibration). None until prepare_calibration is called.
+        self.theta_hat: Tensor | None = None
 
     def _normalise_input(self,x_obs: torch.Tensor) -> torch.Tensor:
         """Standardise data with the model's ``x`` standardiser.
@@ -388,3 +392,122 @@ class ConjugatePosterior():
             theta_hat_true = -torch.linalg.lstsq(A_reg, B).solution
 
         return theta_hat_true * self.s + self.m
+
+    # ------------------------------------------------------------------ #
+    # Beta calibration: the two steps driven by                           #
+    # :func:`nsm_bayes.inference.calibrate_beta.calibrate_beta`.          #
+    # ------------------------------------------------------------------ #
+    @torch.no_grad()
+    def prepare_calibration(self,
+                            beta: float,
+                            alpha: float,
+                            B: int,
+                            x_obs: torch.Tensor,
+                            theta_samples_base: torch.Tensor | None = None,
+                            ess_threshold: float = 0.3) -> None:
+        """Set up the state used by :meth:`estimate_coverage`.
+
+        Computes the NSM point estimate ``theta_hat`` -- the closed-form
+        minimiser of the score-matching loss on `x_obs` -- that the
+        bootstrap credible regions must cover.
+
+        Parameters
+        ----------
+        beta : float
+            Starting value of ``beta`` (unused by the conjugate method;
+            kept so both posterior classes share one flat signature).
+        alpha : float
+            Miscoverage level (unused here; the target coverage is passed
+            to :meth:`estimate_coverage` through ``alpha``).
+        B : int
+            Number of bootstrap resamples per iteration (unused here; it
+            is passed to :meth:`estimate_coverage` on every call).
+        x_obs : torch.Tensor
+            Observed data of shape ``(n, d_x)`` in original units.
+        theta_samples_base : torch.Tensor, optional
+            Base MCMC pool (unused by the conjugate method; the posterior
+            is closed-form).
+        ess_threshold : float, default 0.3
+            ESS refresh trigger of the general method (unused here).
+
+        Notes
+        -----
+        Mirrors the pre-refactor behaviour of
+        ``calibrate_beta_gpc``, which recomputed ``theta_hat`` on every
+        call, by caching it here once instead.
+        """
+        self.theta_hat = self.compute_theta_hat_true(x_obs)
+
+    def theta_samples_base(self) -> torch.Tensor | None:
+        """Base MCMC pool for importance reweighting.
+
+        Always ``None`` for the conjugate method: the posterior is
+        closed-form and coverage is estimated by resampling the Gaussian
+        directly, so no base pool is drawn or cached. Present so both
+        posterior classes share one flat interface.
+        """
+        return None
+
+    @torch.no_grad()
+    def estimate_coverage(self,
+                          beta: float,
+                          alpha: float,
+                          B: int,
+                          x_obs: torch.Tensor,
+                          theta_samples_base: torch.Tensor | None = None,
+                          ess_threshold: float = 0.3) -> float:
+        """Empirical bootstrap coverage at ``beta``.
+
+        Draws ``B`` resamples of the rows of `x_obs` with replacement,
+        evaluates the closed-form posterior
+        :meth:`calibrated_posterior` at ``beta`` for each, and returns the
+        fraction of resamples whose ``1 - alpha`` chi-squared ellipsoid
+        contains the cached ``theta_hat``.
+
+        Parameters
+        ----------
+        beta : float
+            Current value of ``beta`` to evaluate the coverage at.
+        alpha : float
+            Miscoverage level; the credible ellipsoid has nominal level
+            ``1 - alpha``.
+        B : int
+            Number of bootstrap resamples.
+        x_obs : torch.Tensor
+            Observed data of shape ``(n, d_x)`` in original units.
+        theta_samples_base : torch.Tensor, optional
+            Base MCMC pool (unused by the conjugate method).
+        ess_threshold : float, default 0.3
+            ESS refresh trigger of the general method (unused here).
+
+        Returns
+        -------
+        float
+            Fraction of resamples whose credible ellipsoid covers
+            ``theta_hat``.
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`prepare_calibration`.
+        """
+        if self.theta_hat is None:
+            raise RuntimeError(
+                "ConjugatePosterior.estimate_coverage requires "
+                "prepare_calibration to be called first"
+            )
+
+        d_theta = self.prior_mean.shape[0]
+        n_obs = x_obs.shape[0]
+        device = x_obs.device
+        chi2_critical_value = chi2.ppf(1.0 - alpha, df=d_theta)
+
+        covered = 0
+        for _ in range(B):
+            indices = torch.randint(0, n_obs, (n_obs,), device=device)
+            x_boot = x_obs[indices]
+            mu_boot, Sigma_boot = self.calibrated_posterior(x_boot, beta)
+            if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() \
+                    <= chi2_critical_value:
+                covered += 1
+        return covered / B

@@ -1,1 +1,1 @@
-"""Calibration and MCMC sampling for the general (normalising-flow) method."""
+"""MCMC sampling for the general (normalising-flow) method."""

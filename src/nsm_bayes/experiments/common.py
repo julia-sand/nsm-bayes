@@ -18,8 +18,7 @@ from typing import Any, Callable, Generator
 import torch
 from omegaconf import DictConfig
 
-from nsm_bayes.inference.conjugate.calibrate_beta import calibrate_beta_gpc
-from nsm_bayes.inference.general.calibrate import calibrate_beta
+from nsm_bayes.inference.calibrate_beta import calibrate_beta
 from nsm_bayes.models.conjugate import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.normflow import GeneralModel
@@ -178,8 +177,8 @@ def run_normflow_methods(
     ``samples_nle_mis``             NLE posterior samples
     ``cost_nle_mcmc``               NLE sampling time
     ``samples_sm``                  calibrated generalised posterior samples
-    ``cost_sm_mcmc``                time for base sampling, calibration and
-                                    final sampling
+    ``cost_sm_mcmc``                time for the calibration (including its
+                                    base-pool draw) and final sampling
     ``gpc_history``                 calibration history
     ``beta``                        calibrated ``beta``
     ``posterior_mean``              mean of ``samples_sm``
@@ -226,13 +225,11 @@ def run_normflow_methods(
     
     #calibrate beta / temperature
     with timed(save_dir, "sm_mcmc", rep):
-        theta_samples_base = beta_posterior.sample(cfg.beta_base_general)
-
-        beta, history = calibrate_beta(beta_posterior, theta_samples_base, 
-                                        beta_base=cfg.beta_base_general,
+        beta, history = calibrate_beta(beta_posterior,
+                                        beta_init=cfg.beta_base_general,
                                         alpha=cfg.alpha, B=cfg.B, T=cfg.T,
                                         beta_min=cfg.get("beta_min_general", 0.01))
-        
+
         samples_sm_general = beta_posterior.sample(beta)
 
     save(save_dir, "samples_sm", rep, samples_sm_general)
@@ -328,13 +325,13 @@ def run_conjugate_method(
 
     with timed(save_dir, "sm_posterior", rep):
         #calibrate the temperature
-        beta, history = calibrate_beta_gpc(
-            x_obs_mis,
+        beta, history = calibrate_beta(
             posterior,
-            initial_beta=cfg.beta_base_case1,
-            target_coverage=1.0 - cfg.alpha,
-            num_iterations=cfg.T,
-            num_bootstraps=cfg.B,
+            beta_init=cfg.beta_base_case1,
+            alpha=cfg.alpha,
+            B=cfg.B,
+            T=cfg.T,
+            x_obs=x_obs_mis,
             beta_min=cfg.get("beta_min_case1", 0.01),
         )
 

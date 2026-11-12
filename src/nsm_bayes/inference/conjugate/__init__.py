@@ -1,1 +1,1 @@
-"""Beta calibration for the closed-form conjugate posterior."""
+"""Calibration helpers for the closed-form conjugate posterior."""

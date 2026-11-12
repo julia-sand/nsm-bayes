@@ -1,6 +1,7 @@
 """Importance-reweighted bootstrap helpers for beta calibration.
 
-These functions support :func:`nsm_bayes.inference.general.calibrate.calibrate_beta`.
+These functions support :func:`nsm_bayes.inference.calibrate_beta.calibrate_beta`
+(via :meth:`nsm_bayes.models.general.posterior.GeneralPosterior.estimate_coverage`).
 Instead of re-running MCMC for every bootstrap resample and every candidate
 ``beta``, posterior samples drawn once at a base value ``beta_base`` are
 importance-reweighted to approximate the generalised posterior at a new
