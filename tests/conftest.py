@@ -90,7 +90,11 @@ def turin_cfg():
 
 @pytest.fixture
 def sir_uc_cfg():
-    return OmegaConf.create(_tiny_base("sir_undercounting"))
+    cfg = _tiny_base("sir_undercounting")
+    # 123 draws a vacuous undercounting mask (0/40 contaminated) under the
+    # current RNG stream; 124 gives 2/40.
+    cfg.update({"seed_offset": 124})
+    return OmegaConf.create(cfg)
 
 
 # --------------------------------------------------------------------------- #

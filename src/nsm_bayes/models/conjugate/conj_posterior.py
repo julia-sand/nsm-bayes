@@ -403,7 +403,6 @@ class ConjugatePosterior():
                             alpha: float,
                             B: int,
                             x_obs: torch.Tensor,
-                            theta_samples_base: torch.Tensor | None = None,
                             ess_threshold: float = 0.3) -> None:
         """Set up the state used by :meth:`estimate_coverage`.
 
@@ -424,9 +423,6 @@ class ConjugatePosterior():
             is passed to :meth:`estimate_coverage` on every call).
         x_obs : torch.Tensor
             Observed data of shape ``(n, d_x)`` in original units.
-        theta_samples_base : torch.Tensor, optional
-            Base MCMC pool (unused by the conjugate method; the posterior
-            is closed-form).
         ess_threshold : float, default 0.3
             ESS refresh trigger of the general method (unused here).
 
@@ -438,23 +434,12 @@ class ConjugatePosterior():
         """
         self.theta_hat = self.compute_theta_hat_true(x_obs)
 
-    def theta_samples_base(self) -> torch.Tensor | None:
-        """Base MCMC pool for importance reweighting.
-
-        Always ``None`` for the conjugate method: the posterior is
-        closed-form and coverage is estimated by resampling the Gaussian
-        directly, so no base pool is drawn or cached. Present so both
-        posterior classes share one flat interface.
-        """
-        return None
-
     @torch.no_grad()
     def estimate_coverage(self,
                           beta: float,
                           alpha: float,
                           B: int,
                           x_obs: torch.Tensor,
-                          theta_samples_base: torch.Tensor | None = None,
                           ess_threshold: float = 0.3) -> float:
         """Empirical bootstrap coverage at ``beta``.
 
@@ -475,8 +460,6 @@ class ConjugatePosterior():
             Number of bootstrap resamples.
         x_obs : torch.Tensor
             Observed data of shape ``(n, d_x)`` in original units.
-        theta_samples_base : torch.Tensor, optional
-            Base MCMC pool (unused by the conjugate method).
         ess_threshold : float, default 0.3
             ESS refresh trigger of the general method (unused here).
 

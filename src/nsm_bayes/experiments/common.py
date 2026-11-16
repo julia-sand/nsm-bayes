@@ -18,7 +18,7 @@ from typing import Any, Callable, Generator
 import torch
 from omegaconf import DictConfig
 
-from nsm_bayes.inference.calibrate_beta import calibrate_beta
+from nsm_bayes.inference.beta_calibration_loop import calibrate_beta
 from nsm_bayes.models.conjugate import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.normflow import GeneralModel
@@ -227,7 +227,7 @@ def run_normflow_methods(
     with timed(save_dir, "sm_mcmc", rep):
         beta, history = calibrate_beta(beta_posterior,
                                         beta_init=cfg.beta_base_general,
-                                        alpha=cfg.alpha, B=cfg.B, T=cfg.T,
+                                        alpha=cfg.alpha, B=cfg.B, n_iterations=cfg.T,
                                         beta_min=cfg.get("beta_min_general", 0.01))
 
         samples_sm_general = beta_posterior.sample(beta)
@@ -330,7 +330,7 @@ def run_conjugate_method(
             beta_init=cfg.beta_base_case1,
             alpha=cfg.alpha,
             B=cfg.B,
-            T=cfg.T,
+            n_iterations=cfg.T,
             x_obs=x_obs_mis,
             beta_min=cfg.get("beta_min_case1", 0.01),
         )

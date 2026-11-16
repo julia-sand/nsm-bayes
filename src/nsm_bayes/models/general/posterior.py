@@ -30,13 +30,12 @@ import torch
 from torch import Tensor
 from torch.func import vmap
 
-from nsm_bayes.inference.beta_calibration_loop import run_beta_calibration_loop
 from nsm_bayes.inference.bootstrap import (
     bootstrap_coverage_indicator,
     multinomial_bootstrap_counts,
     reweight_for_bootstrap_beta,
 )
-from nsm_bayes.inference.general.slice_sampler import run_multivariate_slice_sampler_tuned
+from nsm_bayes.inference.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats
@@ -288,15 +287,14 @@ class GeneralPosterior:
                             alpha: float,
                             B: int,
                             x_obs: Tensor = None,
-                            theta_samples_base: Tensor = None,
                             ess_threshold: float = 0.3) -> None:
         """Set up the state used by :meth:`estimate_coverage`.
 
         Draws the base MCMC pool with :meth:`sample` at `beta`, caches it
-        together with its per-observation losses, and computes the NSM
-        point estimate ``theta_hat`` (the reference parameter that the
-        bootstrap credible regions must cover). The cached pool is returned
-        by :meth:`theta_samples_base` on every call.
+        on ``self.theta_samples`` together with its per-observation
+        losses, and computes the NSM point estimate ``theta_hat`` (the
+        reference parameter that the bootstrap credible regions must
+        cover).
 
         The pool cache is built without gradients (``per_x_losses`` is
         ``no_grad``); the ``theta_hat`` minimisation runs with gradient
@@ -315,10 +313,6 @@ class GeneralPosterior:
         x_obs : torch.Tensor, optional
             Observed data of shape ``(n, d_x)`` (unused by the general
             method; the posterior holds its own copy).
-        theta_samples_base : torch.Tensor, optional
-            Ignored; the base pool is sampled here at `beta` instead of
-            being passed in. Present so both posterior classes share one
-            flat signature.
         ess_threshold : float, default 0.3
             If the mean effective sample size of the importance weights
             falls below ``ess_threshold * M``, the pool is redrawn at the
@@ -336,37 +330,12 @@ class GeneralPosterior:
         theta_init = self.theta_samples.mean(dim=0)
         self.theta_hat = self.compute_theta_hat_true(theta_init=theta_init)
 
-    def theta_samples_base(self) -> Tensor:
-        """Base MCMC pool used for importance reweighting.
-
-        Returns the pool cached by :meth:`prepare_calibration` (redrawn
-        inside :meth:`estimate_coverage` when its importance weights
-        degenerate).
-
-        Returns
-        -------
-        torch.Tensor
-            Samples of shape ``(M, d_theta)``.
-
-        Raises
-        ------
-        RuntimeError
-            If called before :meth:`prepare_calibration`.
-        """
-        if self.theta_samples is None:
-            raise RuntimeError(
-                "GeneralPosterior.theta_samples_base requires "
-                "prepare_calibration to be called first"
-            )
-        return self.theta_samples
-
     @torch.no_grad()
     def estimate_coverage(self,
                           beta: float,
                           alpha: float,
                           B: int,
                           x_obs: Tensor = None,
-                          theta_samples_base: Tensor = None,
                           ess_threshold: float = 0.3) -> float:
         """Empirical bootstrap coverage at ``beta``.
 
@@ -394,9 +363,6 @@ class GeneralPosterior:
             Number of bootstrap resamples.
         x_obs : torch.Tensor, optional
             Observed data (unused by the general method).
-        theta_samples_base : torch.Tensor, optional
-            Ignored; the cached pool of :meth:`prepare_calibration` (see
-            :meth:`theta_samples_base`) is used instead.
         ess_threshold : float, default 0.3
             Rejuvenation trigger, see :meth:`prepare_calibration`.
 

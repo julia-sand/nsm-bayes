@@ -45,11 +45,13 @@ def test_sir_uc_undercounting_is_one_sided(sir_uc_data):
     is_contam = sir_uc_data.extras["is_contam"]
     assert is_contam.any() and (~is_contam).any(), "seed gives a vacuous test; change the seed"
 
-    # untouched trajectories give identical summaries
-    assert torch.equal(x_cor[~is_contam], x_clean[~is_contam])
+    # untouched trajectories give the same deterministic summary; the two
+    # summary() calls each add independent noise of scale 1/N_sir (~0.005)
+    atol = 0.05
+    assert torch.allclose(x_cor[~is_contam], x_clean[~is_contam], atol=atol)
     # attack rate (col 0) and peak (col 2) never increase under thinning ...
     for col in (0, 2):
-        assert (x_cor[is_contam, col] <= x_clean[is_contam, col]).all()
+        assert (x_cor[is_contam, col] <= x_clean[is_contam, col] + atol).all()
     # ... and with q < 1 the attack rate of some contaminated trajectory drops
     assert (x_cor[is_contam, 0] < x_clean[is_contam, 0]).any()
 
