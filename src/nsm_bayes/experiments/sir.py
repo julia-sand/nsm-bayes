@@ -91,9 +91,8 @@ def generate_data(
     ``x_obs``.
     """
 
-    #training data for surrogate density 
-    theta, y_sim = sim.generate_training_data(cfg.num_samples, )
-    x_sim = sim.summary(y_sim)
+    #training data for surrogate density
+    theta, x_sim = sim.generate_training_data(cfg.num_samples)
 
     #clean data set 
     theta_batch = theta_true.unsqueeze(0).repeat(cfg.n_obs, 1)
@@ -101,10 +100,9 @@ def generate_data(
     x_obs = sim.summary(y_obs)
 
     #mis-specified data set
-    y, is_contam = sim.generate_contaminated_data(theta_true=theta_true,
+    x_obs_mis, is_contam = sim.generate_contaminated_data(theta_true=theta_true,
                                                n_obs=cfg.n_obs,
                                                epsilon=cfg.epsilon,)
-    x_obs_mis = sim.summary(y)
 
     return ExperimentData(
         theta=theta,

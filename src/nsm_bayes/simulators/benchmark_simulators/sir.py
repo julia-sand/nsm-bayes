@@ -263,14 +263,14 @@ class SIRSimulator:
         Returns
         -------
         theta : torch.Tensor
-            Unconstrained prior draws of shape ``(n, d)``.
-        y : torch.Tensor
-            Raw incidence of shape ``(n, T)``; apply :meth:`summary` to get
-            the training features.
+            Unconstrained prior draws of shape ``(n, 4)``.
+        x_sim : torch.Tensor
+            Summary statistics of shape ``(n, 3)``; :meth:`summary` noise
+            (scale ``1/N``) is always added.
         """
         theta = self.prior.sample((n,))
         y = self.simulate(theta)
-        return theta, y
+        return theta, self.summary(y, add_noise=True)
 
     def generate_contaminated_data(
         self,
@@ -299,8 +299,9 @@ class SIRSimulator:
 
         Returns
         -------
-        y : torch.Tensor
-            Incidence of shape ``(n_obs, T)``.
+        x_obs_mis : torch.Tensor
+            Summary statistics of shape ``(n_obs, 3)``; no :meth:`summary`
+            noise is added.
         is_contam : torch.Tensor
             Boolean mask of shape ``(n_obs,)``.
         """
@@ -330,7 +331,7 @@ class SIRSimulator:
 
         y = self.simulate(theta_used)
 
-        return y, is_contam
+        return self.summary(y, add_noise=False), is_contam
 
 
     def apply_undercounting_trajectory(self,
