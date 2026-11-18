@@ -227,6 +227,10 @@ class SIRSimulator:
             * time of the peak, ``argmax_t y_t / (T - 1)``;
             * peak height, ``max_t y_t / N``.
 
+        With ``add_noise=True`` (the default), Gaussian noise is added with
+        standard deviation ``1/N`` on the attack rate and peak height and
+        ``1/(T - 1)`` on the peak time.
+
         Raises
         ------
         ValueError
@@ -247,8 +251,14 @@ class SIRSimulator:
         summary = torch.stack([attack, t_peak, peak], dim=1)
 
         if add_noise:
-            summary += torch.randn_like(summary) / float(self.N)
-            #torch.randn(size=summary.shape) 
+            # Noise on each summary's native scale: the attack rate and peak
+            # height are quantised in 1/N, the peak time in 1/(T-1).
+            scale = torch.tensor(
+                [1.0 / float(self.N), 1.0 / float(max(self.T - 1, 1)), 1.0 / float(self.N)],
+                device=summary.device,
+                dtype=summary.dtype,
+            )
+            summary += torch.randn_like(summary) * scale
 
         return summary
 
@@ -265,8 +275,9 @@ class SIRSimulator:
         theta : torch.Tensor
             Unconstrained prior draws of shape ``(n, 4)``.
         x_sim : torch.Tensor
-            Summary statistics of shape ``(n, 3)``; :meth:`summary` noise
-            (scale ``1/N``) is always added.
+            Summary statistics of shape ``(n, 3)``; :meth:`summary` noise is
+            always added, with scale ``1/N`` on the attack rate and peak
+            height and ``1/(T - 1)`` on the peak time.
         """
         theta = self.prior.sample((n,))
         y = self.simulate(theta)
