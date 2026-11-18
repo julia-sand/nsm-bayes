@@ -97,7 +97,7 @@ def make_gnk_normflow_bundle(force: bool = False) -> Path:
         config_keys=[
             "density_estimator", "num_transforms", "num_blocks",
             "hidden_dim", "robust_flag", "weight_function", "imq_c",
-            "beta_base_general", "beta_min_general",
+            "beta_base_general", "calibration_method", "beta_min_general",
             "alpha", "B", "T", "n_obs",
             "num_posterior_samples", "num_chains", "warmup_steps", "thin",
         ],

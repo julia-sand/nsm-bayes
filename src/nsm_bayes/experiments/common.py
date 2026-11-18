@@ -151,8 +151,9 @@ def run_normflow_methods(
         Experiment configuration. Reads ``num_posterior_samples``,
         ``num_chains``, ``warmup_steps``, ``thin``, ``robust_flag``,
         ``beta_base_general``, ``alpha``, ``B``, ``T`` and, optionally,
-        ``density_estimator`` (default ``"maf"``) and ``beta_min_general``
-        (default ``0.01``).
+        ``density_estimator`` (default ``"maf"``), ``beta_min_general``
+        (default ``0.01``) and ``calibration_method`` (default
+        ``"gpc"``; only ``"gpc"`` is supported by this method).
     save_dir : pathlib.Path
         Output directory.
     rep : int
@@ -225,7 +226,8 @@ def run_normflow_methods(
     #calibrate beta / temperature
     with timed(save_dir, "sm_mcmc", rep):
         beta, history = calibrate_beta(beta_posterior,
-                                        beta_init=cfg.beta_base_general,
+                                        initial_beta=cfg.beta_base_general,
+                                        method=cfg.get("calibration_method", "gpc"),
                                         alpha=cfg.alpha, B=cfg.B, n_iterations=cfg.T,
                                         beta_min=cfg.get("beta_min_general", 0.01))
 
@@ -265,7 +267,10 @@ def run_conjugate_method(
     cfg : omegaconf.DictConfig
         Experiment configuration. Reads ``d_x``, ``hidden_dim``,
         ``robust_flag``, ``beta_base_case1``, ``alpha``, ``T``, ``B`` and,
-        optionally, ``beta_min_case1`` (default ``0.01``).
+        optionally, ``beta_min_case1`` (default ``0.01``) and
+        ``calibration_method`` (default ``"gpc"``; one of
+        ``"gpc"``, ``"bisect"``, ``"grid"``, where ``bisect``
+        and ``grid`` require ``beta_base_case1`` to be a 1-D array).
     save_dir : pathlib.Path
         Output directory.
     rep : int
@@ -326,7 +331,8 @@ def run_conjugate_method(
         #calibrate the temperature
         beta, history = calibrate_beta(
             posterior,
-            beta_init=cfg.beta_base_case1,
+            initial_beta=cfg.beta_base_case1,
+            method=cfg.get("calibration_method", "gpc"),
             alpha=cfg.alpha,
             B=cfg.B,
             n_iterations=cfg.T,

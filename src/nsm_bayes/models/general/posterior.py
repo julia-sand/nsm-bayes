@@ -83,6 +83,12 @@ class GeneralPosterior:
     is taken with respect to raw ``x``.
     """
 
+    #: Only the stochastic-approximation (``gpc``) calibration strategy is
+    #: available for this posterior, and only with a scalar
+    #: ``initial_beta``: the array-start grid search needs the closed-form
+    #: coverage evaluations of the conjugate method.
+    supports_grid_search = False
+
     def __init__(self, x_obs,
                     flow_model,  
                     prior,

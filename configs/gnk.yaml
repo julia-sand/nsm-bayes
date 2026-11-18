@@ -26,6 +26,7 @@ thin: 1
 
 beta_base_general: 1.0           # A reasonable starting value for beta for the general case
 beta_base_case1: 0.1           # A reasonable starting value for beta for case 1
+calibration_method: gpc  # Beta calibration strategy (conjugate method only): gpc, bisect, grid (the latter two need beta_base_case1 as a 1-D array)
 B: 100                   # Number of bootstrap samples
 T: 20                    # Number of iterations when updating beta
 alpha: 0.05              # 1-alpha credible set

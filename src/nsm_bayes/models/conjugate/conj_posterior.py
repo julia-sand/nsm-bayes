@@ -92,6 +92,12 @@ class ConjugatePosterior():
     robust centre and scale.
     """
 
+    #: The closed-form posterior makes bootstrap coverage cheap to
+    #: re-evaluate, so this posterior supports the array ``initial_beta``
+    #: grid search and the ``grid`` / ``bisect`` calibration strategies in
+    #: addition to ``gpc`` and ``rm``.
+    supports_grid_search = True
+
     def __init__(self,
                 model: EnergyBasedModel,
                 prior_mean: torch.Tensor,
@@ -256,7 +262,7 @@ class ConjugatePosterior():
             Posterior covariance, shape ``(d_theta, d_theta)``.
         """
 
-        # 1. Compute the posterior precision matrix
+        # Compute the posterior precision matrix
         Sigma_n_inv = self._compute_posterior_precision_conjugate(x_n, beta, w2)
 
         B = self._compute_B(x_n,w2,grad_w2)
@@ -268,7 +274,7 @@ class ConjugatePosterior():
         # Solve for mu_n using the stable solver.
         mu_n = torch.linalg.solve(Sigma_n_inv, rhs)
 
-        # --- 4. Compute Posterior Covariance from Precision ---
+        # Compute Posterior Covariance from Precision
         Sigma_n = sigma_inverse(Sigma_n_inv)
         
         return mu_n, Sigma_n

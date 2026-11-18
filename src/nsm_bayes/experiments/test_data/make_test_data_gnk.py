@@ -72,7 +72,7 @@ def make_gnk_bundle(force: bool = False) -> Path:
     bundle = make_bundle(
         "gnk", GNK_REP, seed, cfg, prior, theta_true, d_x, data,
         config_keys=[
-            "hidden_dim", "robust_flag", "beta_base_case1",
+            "hidden_dim", "robust_flag", "beta_base_case1", "calibration_method",
             "beta_min_case1", "alpha", "B", "T", "n_obs",
         ],
     )

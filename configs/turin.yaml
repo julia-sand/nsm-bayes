@@ -32,6 +32,7 @@ beta_base_general: 1e-2           # A reasonable starting value for beta for the
 beta_min_general: 1e-4      # Clamping beta at a minimum value for NSM-Bayes
 beta_base_case1: 0.01           # A reasonable starting value for beta for case 1
 beta_min_case1: 1e-4      # Clamping beta at a minimum value for NSM-Bayes-conj
+calibration_method: gpc  # Beta calibration strategy (conjugate method only): gpc, bisect, grid (the latter two need beta_base_case1 as a 1-D array)
 
 B: 100                   # Number of bootstrap samples
 T: 20                    # Number of iterations when updating beta

@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- The `rm` (Robbins-Monro) beta-calibration update rule: `nsm_bayes.inference.beta_update_rules.step_rm`, the `BetaState.slope` field (read only by `step_rm`) and the `calibrate_beta(..., method="rm", rm_slope=...)` path are gone. `calibrate_beta` now dispatches to `gpc`, `bisect` and `grid` only; the grid search still returns the coverage slope for history, but no rule consumes it.
 - `nsm_bayes.inference.general.calibrate` and `nsm_bayes.inference.conjugate.calibrate_beta` (including the unused `calibrate_beta_grid`) — superseded by `nsm_bayes.inference.beta_calibration_loop.calibrate_beta`.
 - The `theta_samples_base` parameter of `prepare_calibration` / `estimate_coverage` (unused by every caller) and the `theta_samples_base()` methods on both posterior classes (the cached pool is read from the `theta_samples` attribute).
 - The `sample_mean_and_covariance` re-export from `nsm_bayes.utils` (the function itself remains in `nsm_bayes.utils.statistics`).
