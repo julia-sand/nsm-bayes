@@ -5,7 +5,6 @@ misspecification is one-sided undercounting of the incidence trajectories
 (binomial thinning with retention probability ``cfg.q``).
 """
 from omegaconf import DictConfig
-from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments import sir
 from nsm_bayes.experiments.common import ExperimentData
@@ -38,9 +37,7 @@ def build_problem(cfg: DictConfig) -> tuple:
 
 def generate_data(
     sim: SIRSimulator,
-    prior,
     theta_true,
-    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the SIR undercounting data.
@@ -49,12 +46,8 @@ def generate_data(
     ----------
     sim : nsm_bayes.simulators.benchmark_simulators.sir.SIRSimulator
         The simulator returned by :func:`build_problem`.
-    prior : torch.distributions.MultivariateNormal
-        The prior returned by :func:`build_problem`.
     theta_true : torch.Tensor
         True parameter vector in unconstrained space (shape ``(4,)``).
-    d_x : int
-        Data dimension (unused here; kept for a uniform signature).
     cfg : omegaconf.DictConfig
         Experiment configuration.
 

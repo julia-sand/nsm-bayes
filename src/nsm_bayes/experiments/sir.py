@@ -7,7 +7,6 @@ observed trajectories is simulated under parameters drawn from the prior.
 """
 import torch
 from omegaconf import DictConfig
-from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments.common import ExperimentData
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
@@ -33,8 +32,6 @@ def build_problem(cfg: DictConfig) -> tuple:
         is used as is.
     theta_true : torch.Tensor
         True parameter vector in the unconstrained space, shape ``(4,)``.
-    d_x : int
-        ``cfg.d_x``.
     """
     dtype = torch.float32
   
@@ -61,14 +58,12 @@ def build_problem(cfg: DictConfig) -> tuple:
     theta_true_constrained = torch.tensor(cfg.theta_true, dtype=dtype).unsqueeze(0)
     theta_true = sim.to_unconstrained(theta_true_constrained).squeeze(0)
 
-    return sim, prior, theta_true, cfg.d_x
+    return sim, prior, theta_true
 
 
 def generate_data(
     sim: SIRSimulator,
-    prior,
     theta_true: torch.Tensor,
-    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the SIR data.
@@ -77,12 +72,8 @@ def generate_data(
     ----------
     sim : nsm_bayes.simulators.benchmark_simulators.sir.SIRSimulator
         The simulator returned by :func:`build_problem`.
-    prior : torch.distributions.MultivariateNormal
-        The prior returned by :func:`build_problem`.
     theta_true : torch.Tensor
         True parameter vector in unconstrained space (shape ``(4,)``).
-    d_x : int
-        Data dimension (unused here; kept for a uniform signature).
     cfg : omegaconf.DictConfig
         Experiment configuration.
 

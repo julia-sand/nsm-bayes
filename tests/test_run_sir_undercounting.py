@@ -31,9 +31,9 @@ def test_sir_uc_clean_trajectory_saved(sir_uc_run, sir_uc_cfg):
 def sir_uc_data(sir_uc_cfg):
     """One repetition of the experiment's data, generated exactly as
     ``run_experiment`` does for rep 0, without running any method."""
-    sim, prior, theta_true, d_x = sir_undercounting.build_problem(sir_uc_cfg)
+    sim, _, theta_true = sir_undercounting.build_problem(sir_uc_cfg)
     set_seed(sir_uc_cfg.seed_offset)
-    return sir_undercounting.generate_data(sim, prior, theta_true, d_x, sir_uc_cfg)
+    return sir_undercounting.generate_data(sim, theta_true, sir_uc_cfg)
 
 
 def test_sir_uc_undercounting_is_one_sided(sir_uc_data):

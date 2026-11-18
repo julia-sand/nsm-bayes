@@ -6,7 +6,6 @@ simulations under random prior parameters.
 """
 import torch
 from omegaconf import DictConfig
-from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments.common import ExperimentData
 from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
@@ -31,8 +30,6 @@ def build_problem(cfg: DictConfig) -> tuple:
         Gaussian prior in log space.
     theta_true : torch.Tensor
         ``log(cfg.theta_true)``, shape ``(4,)``.
-    d_x : int
-        ``cfg.d_x``.
     """
     dtype = torch.float32
     theta_true = torch.log(torch.tensor(cfg.theta_true, dtype=dtype))
@@ -49,14 +46,12 @@ def build_problem(cfg: DictConfig) -> tuple:
         else None,
     )
     prior = sim.prior
-    return sim, prior, theta_true, cfg.d_x
+    return sim, prior, theta_true
 
 
 def generate_data(
     sim: TurinSimulator,
-    prior: MultivariateNormal,
     theta_true: torch.Tensor,
-    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the Turin data.
@@ -65,12 +60,8 @@ def generate_data(
     ----------
     sim : nsm_bayes.simulators.benchmark_simulators.simulators.TurinSimulator
         The simulator returned by :func:`build_problem`.
-    prior : torch.distributions.MultivariateNormal
-        The prior returned by :func:`build_problem`.
     theta_true : torch.Tensor
         True parameter vector in log space (shape ``(4,)``).
-    d_x : int
-        Data dimension (unused here; kept for a uniform signature).
     cfg : omegaconf.DictConfig
         Experiment configuration.
 

@@ -52,12 +52,14 @@ def generate_experiment_data(exp_mod: ModuleType, cfg: DictConfig, rep: int) -> 
     Returns
     -------
     (sim, prior, theta_true, d_x, seed, data)
-        The ``build_problem`` outputs, the seed, and the ``ExperimentData``.
+        The ``build_problem`` outputs, ``d_x`` (from ``cfg``), the seed, and
+        the ``ExperimentData``.
     """
-    sim, prior, theta_true, d_x = exp_mod.build_problem(cfg)
+    sim, prior, theta_true = exp_mod.build_problem(cfg)
+    d_x = int(cfg.d_x)
     seed = int(cfg.seed_offset + rep)
     set_seed(seed)
-    data = exp_mod.generate_data(sim, prior, theta_true, d_x, cfg)
+    data = exp_mod.generate_data(sim, theta_true, cfg)
     return sim, prior, theta_true, d_x, seed, data
 
 

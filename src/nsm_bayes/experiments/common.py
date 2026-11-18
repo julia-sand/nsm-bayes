@@ -35,7 +35,6 @@ __all__ = [
     "run_normflow_methods",
     "run_conjugate_method",
     "save",
-    "set_seed",
     "timed",
 ]
 
@@ -391,11 +390,11 @@ def run_experiment(
     ...                Path("data/gnk"))
     """
     save_dir.mkdir(parents=True, exist_ok=True)
-    sim, prior, theta_true, d_x = problem_module.build_problem(cfg)
+    sim, prior, theta_true = problem_module.build_problem(cfg)
 
     for rep in range(cfg.num_repeat):
         set_seed(cfg.seed_offset + rep)
-        data = problem_module.generate_data(sim, prior, theta_true, d_x, cfg)
+        data = problem_module.generate_data(sim, theta_true, cfg)
 
         save(save_dir, "theta", rep, data.theta)
         save(save_dir, "x_sim", rep, data.x_sim)

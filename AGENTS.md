@@ -89,10 +89,9 @@ iterating, and the full suite before you finish.
    `torch.manual_seed` calls in library code. `seed_offset` is 1 for gnk and
    123 for sir/sir_undercounting/turin, to reproduce historical results.
 3. **Uniform experiment interface.** Every `experiments/<exp>.py` exposes
-   exactly `build_problem(cfg) -> (sim, prior, theta_true, d_x)` and
-   `generate_data(sim, prior, theta_true, d_x, cfg) -> ExperimentData`,
-   even if some arguments are unused. Experiment-specific things to save go in
-   `ExperimentData.extras`.
+   exactly `build_problem(cfg) -> (sim, prior, theta_true)` and
+   `generate_data(sim, theta_true, cfg) -> ExperimentData`.
+   Experiment-specific things to save go in `ExperimentData.extras`.
 4. **Uniform method-step interface.** `(data, prior, cfg, save_dir, rep) -> None`.
    A new script is just: pick an experiment module + a method step, call
    `common.run_experiment`. Keep scripts thin; logic belongs in `src/`.

@@ -5,7 +5,6 @@ observed values is replaced by values from ``cfg.outlier_values``.
 """
 import torch
 from omegaconf import DictConfig
-from torch.distributions import MultivariateNormal
 
 from nsm_bayes.experiments.common import ExperimentData
 from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
@@ -29,8 +28,6 @@ def build_problem(cfg: DictConfig) -> tuple:
         Gaussian prior on ``[A, log(B), g, log(k)]``.
     theta_true : torch.Tensor
         True parameter vector in the same space, shape ``(4,)``.
-    d_x : int
-        Data dimension, always ``1``.
     """
     dtype = torch.float32
     prior_mean = torch.tensor(cfg.prior_mean, dtype=dtype)
@@ -39,14 +36,12 @@ def build_problem(cfg: DictConfig) -> tuple:
 
     sim = GandKSimulator(prior_mean=prior_mean, prior_cov=prior_cov)
     prior = sim.prior
-    return sim, prior, theta_true, 1
+    return sim, prior, theta_true
 
 
 def generate_data(
     sim: GandKSimulator,
-    prior: MultivariateNormal,
     theta_true: torch.Tensor,
-    d_x: int,
     cfg: DictConfig,
 ) -> ExperimentData:
     """Generate one repetition of the g-and-k data.
@@ -55,12 +50,8 @@ def generate_data(
     ----------
     sim : nsm_bayes.simulators.benchmark_simulators.simulators.GandKSimulator
         The simulator returned by :func:`build_problem`.
-    prior : torch.distributions.MultivariateNormal
-        The prior returned by :func:`build_problem`.
     theta_true : torch.Tensor
         True parameter vector (shape ``(4,)``).
-    d_x : int
-        Data dimension (unused here; kept for a uniform signature).
     cfg : omegaconf.DictConfig
         Experiment configuration.
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class MCMCSettings:
-    """Immutable configuration of an MCMC run.
+    """Configuration of an MCMC run.
 
     Used both for sbi's NLE posterior sampling and for the slice sampler of
     :class:`~nsm_bayes.models.general.posterior.GeneralPosterior`.
