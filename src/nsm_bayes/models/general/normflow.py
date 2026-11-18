@@ -84,7 +84,6 @@ class GeneralModel():
         #fit the model, return trained model 
         #  
         self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
-        self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
         self._freeze()
         return self
 
