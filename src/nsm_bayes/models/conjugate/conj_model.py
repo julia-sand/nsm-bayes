@@ -367,8 +367,8 @@ class EnergyBasedModel(nn.Module):
 
         target._load_state(ckpt, ckpt["T_phi_state_dict"]["network.0.weight"].dtype)
         
-        #disable gradients 
-        self.requires_grad_(False) 
+        #disable gradients (on the loaded model, which may be a fresh instance)
+        target.requires_grad_(False) 
         return target
 
     # ------------------------------------------------------------ checkpoint

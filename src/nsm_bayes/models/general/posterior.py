@@ -194,7 +194,6 @@ class GeneralPosterior:
         ell = vmap(lambda th: self._losses_one_theta(th))(theta_samples)
         return ell, ell.mean(dim=1)
 
-    #@torch.no_grad()
     def posterior_log_prob(self, theta_np: np.ndarray, beta: float) -> float:
         """Unnormalised log-density of the generalised posterior.
 

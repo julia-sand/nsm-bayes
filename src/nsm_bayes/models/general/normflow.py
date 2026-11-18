@@ -77,12 +77,28 @@ class GeneralModel():
         Notes
         -----
         Both inputs are cast to ``float32``. Training uses sbi's defaults
-        (including its own validation split and early stopping).
+        (including its own validation split and early stopping). The
+        estimator is then frozen: its parameters do not require gradients
+        (it is used for inference only).
         """
         #fit the model, return trained model 
         #  
         self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
+        self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
+        self._freeze()
         return self
+
+    def _freeze(self) -> None:
+        """Freeze the estimator: it is used for inference only.
+
+        Keeping its parameters out of the autograd graph means inference
+        (slice-sampler log-densities, cached losses) never builds unused
+        graphs, and ``compute_theta_hat_true``'s ``backward()`` only
+        differentiates through the ``theta`` conditioning input.
+        """
+        for p in self.estimator.parameters():
+            p.requires_grad_(False)
+
 
     def load_checkpoint(self, path):
         """Load a likelihood estimator saved with ``torch.save``.
@@ -101,9 +117,11 @@ class GeneralModel():
         -----
         The whole estimator module is pickled, not just a state dict, so the
         file is read with ``weights_only=False``; only load files you trust.
-        The estimator is mapped onto the CPU, where it is trained.
+        The estimator is mapped onto the CPU, where it is trained, and
+        frozen (parameters do not require gradients), as in :meth:`fit`.
         """
         self.estimator = torch.load(path, map_location="cpu", weights_only=False)
+        self._freeze()  # also covers older checkpoints saved before freezing
         return self
 
     def log_prob(self, x_obs, theta_vec=None):
