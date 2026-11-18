@@ -77,7 +77,7 @@ def generate_data(
     y_obs_mis, is_contam = sim.apply_undercounting_trajectory(y_obs,
                                                epsilon=cfg.epsilon,
                                                q = cfg.q)
-    x_obs_mis = sim.summary(y_obs_mis)
+    x_obs_mis = sim.summary(y_obs_mis,add_noise=False)
 
     return ExperimentData(
         theta=theta,
