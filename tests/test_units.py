@@ -778,3 +778,81 @@ def test_grid_method_returns_grid_point():
     assert beta == 10.0
     assert hist["betas"] == [0.1, 1.0, 10.0]  # grid history, not loop history
     assert len(hist["coverages"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# optimize_beta_bo: GP-based Bayesian-optimisation beta selection
+# ---------------------------------------------------------------------------
+
+
+def test_optimize_beta_bo_rejects_bad_inputs():
+    from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
+
+    # Mismatched lengths
+    with pytest.raises(ValueError, match="same length"):
+        optimize_beta_bo([0.1, 0.2], [0.9], target_coverage=0.95)
+
+    # Fewer than two grid points
+    with pytest.raises(ValueError, match="at least two"):
+        optimize_beta_bo([0.1], [0.9], target_coverage=0.95)
+
+    # Non-positive beta
+    with pytest.raises(ValueError, match="positive"):
+        optimize_beta_bo([0.1, -0.2], [0.9, 0.8], target_coverage=0.95)
+
+
+def test_optimize_beta_bo_recovers_crossing_beta():
+    """When coverage is monotonic and crosses the target, the BO estimate
+    should be close to the true crossing point."""
+    from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
+
+    # coverage(b) = 0.8 + 0.5 * b  ->  crossing at b = 0.3
+    betas = np.array([0.05, 0.1, 0.2, 0.3, 0.5, 1.0], dtype=float)
+    coverages = np.array([0.8 + 0.5 * b for b in betas])
+
+    beta = optimize_beta_bo(betas, coverages, target_coverage=0.95)
+
+    assert np.isfinite(beta) and beta > 0
+    # The GP should land within a reasonable range of the true crossing (0.3)
+    assert 0.05 < beta < 1.0
+
+
+def test_optimize_beta_bo_fallback_when_no_crossing():
+    """If coverage never reaches the target, return the closest point."""
+    from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
+
+    # coverage is always well below target 0.99
+    betas = np.array([0.01, 0.02, 0.05, 0.1], dtype=float)
+    coverages = np.array([0.50, 0.55, 0.70, 0.80])
+
+    beta = optimize_beta_bo(betas, coverages, target_coverage=0.99)
+    assert np.isfinite(beta) and beta > 0
+    # Should be near the grid point with the largest coverage (0.1)
+    assert beta == pytest.approx(0.1, rel=0.5)
+
+
+def test_optimize_beta_bo_respects_beta_min_floor():
+    """The returned beta is never below beta_min."""
+    from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
+
+    betas = np.array([0.001, 0.002, 0.005, 0.01], dtype=float)
+    # coverage increasing, crossing below 0.01
+    coverages = np.array([0.90, 0.93, 0.97, 0.99])
+
+    beta = optimize_beta_bo(betas, coverages, target_coverage=0.95,
+                            beta_min=0.01)
+    assert beta >= 0.01 - 1e-12
+
+
+def test_optimize_beta_bo_result_deterministic():
+    """Repeated calls with the same inputs give the same beta."""
+    from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
+
+    betas = np.array([0.01, 0.05, 0.1, 0.2, 0.5, 1.0], dtype=float)
+    coverages = np.array([0.60, 0.78, 0.90, 0.96, 0.99, 1.0])
+
+    results = set()
+    for _ in range(3):
+        results.add(float(optimize_beta_bo(betas, coverages, target_coverage=0.95)))
+    assert len(results) == 1  # fully deterministic
+
