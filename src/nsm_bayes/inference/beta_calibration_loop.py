@@ -275,8 +275,9 @@ def calibrate_beta(
     Raises
     ------
     TypeError
-        If `initial_beta` is a list or tuple, or on the old ``beta_init``
-        / ``step_schedule`` keyword arguments.
+        If `initial_beta` is a list or tuple, on the old ``beta_init``
+        / ``step_schedule`` keyword arguments, or on any other unexpected
+        keyword argument.
     ValueError
         If `method` is unknown, or the method / ``initial_beta`` combination
         is invalid for `posterior`.
@@ -290,6 +291,11 @@ def calibrate_beta(
                 f"calibrate_beta() got an unexpected keyword argument {old!r} "
                 "(renamed to initial_beta; step schedules are set by the method)"
             )
+
+    if kwargs:
+        raise TypeError(
+            f"calibrate_beta() got an unexpected keyword argument {next(iter(kwargs))!r}"
+        )
 
     #validate the inputs for compatibility methods
     is_array, grid, scalar_start = _validate_initial_beta(initial_beta)

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- **Breaking change:** `nsm_bayes.inference.beta_calibration_loop.calibrate_beta` now validates its keyword arguments strictly: any keyword not in the signature (including misspellings such as `init_beta`, `beta_minimum` or `num_bootstrap`) raises `TypeError` immediately, instead of being silently ignored (the old special-case `TypeError`s for `beta_init` / `step_schedule` are unchanged). No in-repo caller passes such keywords, so experiment results are bit-identical. Covered by `tests/test_units.py::test_unknown_kwargs_raise_type_error`.
+
 ### Added
 
 - `nsm_bayes.inference.beta_bo_calibration.optimize_beta_bo(betas, coverages, target_coverage=..., beta_min=...)`: Bayesian-optimisation beta calibration via a GP on a coverage grid. Fits a `Matern`-kernel `GaussianProcessRegressor` to pre-computed `(log beta, coverage)` pairs and returns the scalar `beta` where the GP mean crosses the target coverage (clamped to `beta_min`). Unit-tested in `tests/test_units.py` (5 tests: crossing recovery, no-crossing fallback, `beta_min` floor, input validation, determinism).
