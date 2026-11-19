@@ -135,15 +135,13 @@ class TurinSimulator:
 
     # Summary function
     def temporalMomentsGeneral(self, Y, K=3):
-        n = Y.shape[0]
-        out = torch.zeros((n, K), dtype=torch.float64)
-
-        for k in range(K):
-            for i in range(n):
-                y = torch.fft.ifft(Y[i, :])
-                out[i, k] = torch.trapz(self.tau**k * (torch.abs(y) ** 2), self.tau)
-
-        return torch.log(out).float()
+        
+        power = torch.fft.ifft(Y, dim=1).abs() ** 2                        # (n, Ns): all receivers in one FFT
+        tau_k = self.tau ** torch.arange(K, device=self.tau.device).unsqueeze(1)  # (K, Ns): tau^0, tau^1, tau^2
+        moments = torch.trapz(power.unsqueeze(1) * tau_k, self.tau, dim=-1)       # (n, K)
+        
+        return torch.log(moments.double()).float()
+        
     
     def simulate_channel(self,theta,n_obs,):
         
@@ -160,13 +158,10 @@ class TurinSimulator:
             alpha = torch.zeros(n_points, dtype=torch.float32)
             sigma2 = G0 * torch.exp(-delays / T) / lambda_0 * self.B
 
-            for l in range(n_points):
-                if delays[l] < self.tau0:
-                    alpha[l] = 0
-                else:
-                    std = torch.sqrt(sigma2[l] / 2)
-                    alpha[l] = torch.normal(0, std) + 1j * torch.normal(0, std)
-
+            std = torch.sqrt(sigma2 / 2)                                           # (n_points,)
+            alpha = torch.complex(torch.normal(0.0, std), torch.normal(0.0, std))  # complex64, (n_points,)
+            alpha[delays < self.tau0] = 0
+            
             # H[jR,f]
             H[jR, :] = torch.matmul(
                 torch.exp(
@@ -214,15 +209,17 @@ class TurinSimulator:
         normal = torch.distributions.Normal(0, std)
         return normal.sample((n, self.Ns)) + 1j * normal.sample((n, self.Ns))
 
-    def summary(self,Y,outlier_indices=None, output="moments"):
-
-        # go to time domain, compute power
-        y_td = torch.fft.ifft(Y, dim=1)               # shape (N, Ns), complex
-        p = torch.abs(y_td) ** 2                      # power
-        p_dB = 10 * torch.log10(p + 1e-12)            # avoid log(0)
+    def summary(self, Y, outlier_indices=None, output="moments"):
 
         if output == "moments":
+        
             temporal_moments =self.temporalMomentsGeneral(Y)
             return temporal_moments
+        
         elif output == "data":
+                
+            # go to time domain, compute power
+            power = torch.fft.ifft(Y, dim=1).abs() ** 2       # (n, Ns): all receivers in one FFT
+            p_dB = 10 * torch.log10(power + 1e-12)            # avoid log(0)
+                
             return p_dB.detach().cpu(), outlier_indices.detach().cpu(), self.tau.detach().cpu()
