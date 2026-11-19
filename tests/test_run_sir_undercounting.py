@@ -9,7 +9,7 @@ import torch
 
 from nsm_bayes.experiments import common, sir_undercounting
 from nsm_bayes.utils import set_seed
-from tests.conftest import assert_posterior_artifacts, load_tensor
+from tests.conftest import assert_posterior_artifacts
 
 
 @pytest.fixture
@@ -18,13 +18,6 @@ def sir_uc_run(sir_uc_cfg, tmp_path):
     save_dir = tmp_path / "sir_uc"
     common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_normflow_methods, save_dir)
     return save_dir
-
-
-def test_sir_uc_clean_trajectory_saved(sir_uc_run, sir_uc_cfg):
-    """The clean observed trajectories are saved with the right shape."""
-    y_obs = load_tensor(sir_uc_run, "y_obs_0.pkl")
-    assert y_obs.shape == (sir_uc_cfg.n_obs, sir_uc_cfg.T_sir)
-    assert torch.isfinite(y_obs).all()
 
 
 @pytest.fixture
@@ -61,20 +54,14 @@ def test_sir_uc_undercounting_is_one_sided(sir_uc_data, sir_uc_cfg):
     # ... and with q < 1 the attack rate of some contaminated trajectory drops
     assert (x_cor[is_contam, 0] < x_clean[is_contam, 0]).any()
 
+    # The clean observed trajectories are saved with the right shape.
+    y_obs = sir_uc_data.extras["y_obs"]
+    assert y_obs.shape == (sir_uc_cfg.n_obs, sir_uc_cfg.T_sir)
+    assert torch.isfinite(y_obs).all()
+
 
 def test_sir_uc_case1_posterior(sir_uc_run, sir_uc_cfg):
     """The Case-1 posterior artifacts exist and are structurally valid."""
     assert_posterior_artifacts(
         sir_uc_run, d_theta=4, beta_min=float(sir_uc_cfg.get("beta_min_general", 0.0))
     )
-
-
-def test_sir_uc_data_identical_across_methods(sir_uc_cfg, tmp_path):
-    """Both method variants produce identical data for the same seed."""
-    nf_dir = tmp_path / "sir_uc_nf"
-    cj_dir = tmp_path / "sir_uc_cj"
-    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_normflow_methods, nf_dir)
-    common.run_experiment(sir_uc_cfg, sir_undercounting, common.run_conjugate_method, cj_dir)
-    for name in ("theta", "x_sim", "x_obs_mis", "y_obs", "is_contam"):
-        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
-                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"

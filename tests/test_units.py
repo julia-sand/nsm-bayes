@@ -765,6 +765,13 @@ def test_old_kwargs_raise_type_error():
                        n_iterations=1)
 
 
+def test_unknown_kwargs_raise_type_error():
+    # strict keyword validation: anything not in the signature is rejected
+    for bad in ("init_beta", "beta_minimum", "num_bootstrap", "n_boot", "ess_thresh"):
+        with pytest.raises(TypeError, match=bad):
+            calibrate_beta(_NoGridPosterior(), n_iterations=1, **{bad: 1.0})
+
+
 def test_array_initial_beta_adds_history_extras():
     # coverage crossing the target inside [1, 10]: grid search + gpc loop
     cov = lambda b: 1.35 - 0.5 * math.log10(b)

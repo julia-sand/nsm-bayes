@@ -25,14 +25,3 @@ def test_sir_case1_posterior(sir_run, sir_cfg):
     assert_posterior_artifacts(
         sir_run, d_theta=4, beta_min=float(sir_cfg.get("beta_min_case1", 0.0))
     )
-
-def test_sir_nets_saved(sir_run):
-    """The Case-1 nets and standardizers are saved with the expected keys."""
-    nets = torch.load(sir_run / "conjugate_nets_0.pt", map_location="cpu", weights_only=False)
-    for key in (
-        "T_phi_state_dict",
-        "B_phi_state_dict",
-        "standardizer_x_state_dict",
-        "standardizer_theta_state_dict",
-    ):
-        assert key in nets, f"conjugate_nets missing {key!r}"

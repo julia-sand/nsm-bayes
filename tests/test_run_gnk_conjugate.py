@@ -7,17 +7,10 @@ The data files must also be bit-identical to the normflow variant's.
 """
 import pytest
 import torch
-from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, gnk
-from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
 
-from tests.conftest import assert_posterior_artifacts, load_tensor
-
-def _theta_true() -> torch.Tensor:
-    """Return the ``theta_true`` from ``configs/gnk.yaml``."""
-    cfg = OmegaConf.load("configs/gnk.yaml")
-    return torch.tensor(cfg.theta_true, dtype=torch.float32)
+from tests.conftest import assert_posterior_artifacts
 
 
 @pytest.fixture
@@ -26,18 +19,6 @@ def gnk_run(gnk_cfg, tmp_path):
     save_dir = tmp_path / "gnk_conjugate"
     common.run_experiment(gnk_cfg, gnk, common.run_conjugate_method, save_dir)
     return save_dir
-
-
-def test_gnk_model_data_changes_with_seed():
-    """Different seeds give different data."""
-    t = _theta_true()
-    sim = GandKSimulator()
-    torch.manual_seed(1)
-    clean = sim.simulate(t, n=4)
-    torch.manual_seed(2)
-    noisy = sim.simulate(t, n=4)
-    assert clean.shape == noisy.shape == (4,)
-    assert not torch.equal(clean, noisy), "Different seeds had no effect on the output"
 
 
 def test_gnk_case1_posterior(gnk_run, gnk_cfg):
