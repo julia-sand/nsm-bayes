@@ -118,7 +118,7 @@ def _iterative_loop(
     max_log_step: float,
     beta_min: float,
     ess_threshold: float,
-) -> tuple[float, list[float], list[float], tuple[float, float] | None]:
+) -> tuple[float, list[float], list[float], list[float], tuple[float, float] | None]:
     """Run the shared iteration loop under the selected update rule.
 
     Each iteration estimates the coverage at the current ``beta`` through
@@ -152,6 +152,8 @@ def _iterative_loop(
         ``exp(log_beta)`` after the final iteration.
     betas, coverages : list of float
         ``beta`` after each update and the coverage that drove it.
+    ess_list : list of float
+        Mean effective sample size at each iteration.
     final_bracket : tuple of float or None
         The final bracket after the last update (``bisect`` only).
     """
@@ -159,11 +161,14 @@ def _iterative_loop(
 
     betas: list[float] = []
     coverages: list[float] = []
+    ess_list: list[float] = []
     for t in range(n_iterations):
         beta = math.exp(log_beta)
-        c_hat = posterior.estimate_coverage(
+        c_hat, ess, _ = posterior.estimate_coverage(
             beta, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
         )
+        c_hat = float(c_hat)
+        ess_list.append(float(ess))
         if method == "bisect":
             log_beta, bracket = step_fn(
                 log_beta, c_hat, t,
@@ -181,7 +186,7 @@ def _iterative_loop(
             )
         betas.append(math.exp(log_beta))
         coverages.append(c_hat)
-    return math.exp(log_beta), betas, coverages, bracket
+    return math.exp(log_beta), betas, coverages, ess_list, bracket
 
 
 def calibrate_beta(
@@ -257,10 +262,11 @@ def calibrate_beta(
     beta : float
         The calibrated value of ``beta``.
     history : dict
-        Always contains ``{"betas": list[float], "coverages": list[float]}``
-        (for ``grid``: the grid in increasing order and its coverages;
-        for the iterative rules: the value after each update and the
-        empirical coverage that drove it).  Extra keys, present only when
+        Always contains ``{"betas": list[float], "coverages": list[float],
+        "ess": list[float]}`` (for ``grid``: the grid in increasing order
+        and its coverages and mean effective sample sizes; for the
+        iterative rules: the value after each update and the empirical
+        coverage that drove it).  Extra keys, present only when
         an array ``initial_beta`` was given: ``"grid"`` (all evaluated
         points, grid plus refinement mids), ``"initial_beta"`` (the scalar
         start actually used) and, when a crossing was found, ``"slope"``
@@ -333,8 +339,9 @@ def calibrate_beta(
         )
         history["betas"] = grid_hist["betas"]
         history["coverages"] = grid_hist["coverages"]
+        history["ess"] = grid_hist["ess"]
     else:
-        beta, betas, coverages, final_bracket = _iterative_loop(
+        beta, betas, coverages, ess_list, final_bracket = _iterative_loop(
             posterior, x_obs, math.log(start), bracket,
             method=method, target=target, B=B, n_iterations=n_iterations,
             alpha=alpha, max_log_step=max_log_step, beta_min=beta_min,
@@ -342,6 +349,7 @@ def calibrate_beta(
         )
         history["betas"] = betas
         history["coverages"] = coverages
+        history["ess"] = ess_list
         if final_bracket is not None:
             history["bracket"] = (
                 math.exp(final_bracket[0]), math.exp(final_bracket[1])

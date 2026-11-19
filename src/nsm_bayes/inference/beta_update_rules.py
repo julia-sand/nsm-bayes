@@ -121,7 +121,7 @@ def step_bisect(
 
 def run_grid_search(
     grid: list[float],
-    coverage_fn: Callable[[float], float],
+    coverage_fn: Callable[[float], tuple[float, float, int]],
     *,
     target_coverage: float,
     beta_min: float,
@@ -130,7 +130,9 @@ def run_grid_search(
 
     ``grid`` is a sequence of positive ``beta`` values (already sorted and
     validated by the caller).  Each value costs one ``coverage_fn(beta)``
-    evaluation.  Ties in ``|coverage - target|`` go to coverage at or above
+    evaluation; ``coverage_fn`` returns the 3-tuple
+    ``(coverage, ess, pool_size)`` and only the coverage is used for the
+    selection.  Ties in ``|coverage - target|`` go to coverage at or above
     the target, then to the larger ``beta``.
 
     Returns
@@ -138,21 +140,28 @@ def run_grid_search(
     beta : float
         The selected grid value, floored at ``beta_min``.
     history : dict
-        ``{"betas": [...], "coverages": [...]}`` with the grid in increasing
-        order and its coverages.
+        ``{"betas": [...], "coverages": [...], "ess": [...]}`` with the grid
+        in increasing order and its coverages and mean effective sample
+        sizes.
     """
     if grid[0] <= 0:
         raise ValueError("initial_beta grid must contain positive values")
 
-    covs = [float(coverage_fn(b)) for b in grid]
+    covs, esss = [], []
+    for b in grid:
+        cov, ess, _ = coverage_fn(b)
+        covs.append(float(cov))
+        esss.append(float(ess))
     gaps = [abs(c - target_coverage) for c in covs]
     best = min(range(len(grid)), key=lambda i: (gaps[i], -covs[i], -grid[i]))
-    return max(grid[best], beta_min), {"betas": list(grid), "coverages": covs}
+    return max(grid[best], beta_min), {
+        "betas": list(grid), "coverages": covs, "ess": esss,
+    }
 
 
 def grid_start(
     grid: list[float],
-    coverage_fn: Callable[[float], float],
+    coverage_fn: Callable[[float], tuple[float, float, int]],
     *,
     target_coverage: float,
     beta_min: float,
@@ -168,6 +177,9 @@ def grid_start(
     (all above target), the smallest (all below) or the closest, and slope
     and bracket ``None``.
 
+    ``coverage_fn`` returns the 3-tuple ``(coverage, ess, pool_size)``;
+    only the coverage drives the search.
+
     Returns
     -------
     start : float
@@ -180,14 +192,19 @@ def grid_start(
         The final refined bracket ``(log lo, log hi)``, or ``None`` without
         a crossing.
     grid_history : dict
-        ``{"betas": [...], "coverages": [...]}`` for every evaluated point
-        (grid plus refinement mids), in increasing order.
+        ``{"betas": [...], "coverages": [...], "ess": [...]}`` for every
+        evaluated point (grid plus refinement mids), in increasing order.
     """
     if not grid or grid[0] <= 0:
         raise ValueError("initial_beta grid must contain positive values")
 
-    covs = [float(coverage_fn(b)) for b in grid]
+    covs, esss = [], []
+    for b in grid:
+        cov, ess, _ = coverage_fn(b)
+        covs.append(float(cov))
+        esss.append(float(ess))
     seen = dict(zip(grid, covs))  # every evaluated beta -> coverage
+    seen_ess = dict(zip(grid, esss))  # every evaluated beta -> ess
 
     i = None  # first j with covs[j] >= target > covs[j + 1]
     for j in range(len(grid) - 1):
@@ -200,8 +217,10 @@ def grid_start(
         lo, c_lo, hi, c_hi = grid[i], covs[i], grid[i + 1], covs[i + 1]
         for _ in range(refine_steps):
             mid = math.sqrt(lo * hi)
-            c_mid = float(coverage_fn(mid))
+            c_mid, ess_mid, _ = coverage_fn(mid)
+            c_mid = float(c_mid)
             seen[mid] = c_mid
+            seen_ess[mid] = float(ess_mid)
             if c_mid >= target_coverage:
                 lo, c_lo = mid, c_mid
             else:
@@ -222,4 +241,5 @@ def grid_start(
     return max(start, beta_min), slope, bracket, {
         "betas": ordered,
         "coverages": [seen[b] for b in ordered],
+        "ess": [seen_ess[b] for b in ordered],
     }

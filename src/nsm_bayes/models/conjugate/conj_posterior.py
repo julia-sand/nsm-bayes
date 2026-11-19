@@ -446,7 +446,7 @@ class ConjugatePosterior():
                           alpha: float,
                           B: int,
                           x_obs: torch.Tensor,
-                          ess_threshold: float = 0.3) -> float:
+                          ess_threshold: float = 0.3) -> tuple[float, float, int]:
         """Empirical bootstrap coverage at ``beta``.
 
         Draws ``B`` resamples of the rows of `x_obs` with replacement,
@@ -471,9 +471,15 @@ class ConjugatePosterior():
 
         Returns
         -------
-        float
+        cov : float
             Fraction of resamples whose credible ellipsoid covers
             ``theta_hat``.
+        ess_mean : float
+            Always ``float('inf')`` for the conjugate method: the
+            closed-form posterior has no MCMC pool, so there is no
+            effective sample size to track.
+        pool_size : int
+            Always ``0``: no MCMC pool exists.
 
         Raises
         ------
@@ -499,4 +505,9 @@ class ConjugatePosterior():
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() \
                     <= chi2_critical_value:
                 covered += 1
-        return covered / B
+        cov = covered / B
+        # Closed-form posterior: no MCMC pool, so ESS is infinite and
+        # pool size is zero.  The caller's refresh check
+        # ``ess_mean < ess_threshold * pool_size`` is then
+        # ``inf < 0`` which is always False, so no refresh is triggered.
+        return cov, float("inf"), 0

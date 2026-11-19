@@ -329,7 +329,7 @@ class _FlatGeneralPosterior:
         )
         ess_mean = (1.0 / (W ** 2).sum(dim=1)).mean().item()
         assert ess_mean >= ess_threshold * self.theta_samples.shape[0]
-        return cover / B
+        return cover / B, ess_mean, self.theta_samples.shape[0]
 
 
 class _FixedConjugatePosterior:
@@ -357,7 +357,9 @@ class _FixedConjugatePosterior:
             from nsm_bayes.utils.statistics import mahalanobis_sq
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() <= crit:
                 covered += 1
-        return covered / B
+        # Closed-form posterior: no MCMC pool, so ESS is infinite and the
+        # pool size is zero (same convention as the real method).
+        return covered / B, float("inf"), 0
 
     def calibrated_posterior(self, x_boot, beta):
         return torch.zeros(len(self.prior_mean)), torch.eye(len(self.prior_mean))
@@ -411,6 +413,16 @@ def test_calibration_never_goes_below_beta_min(calibration_run):
     assert min(hist["betas"]) >= BETA_MIN - 1e-12
     if not covered:
         assert abs(hist["betas"][-1] - BETA_MIN) < 1e-12   # 8 capped steps reach the floor
+
+
+def test_calibration_history_records_ess(calibration_run):
+    """The loop records the mean ESS returned by ``estimate_coverage`` at
+    every iteration.  The conjugate stand-in reports ``inf`` (no MCMC
+    pool), so the value check is structural: one non-negative entry per
+    iteration."""
+    covered, hist = calibration_run
+    assert len(hist["ess"]) == N_ITER
+    assert all(e >= 0.0 for e in hist["ess"])
 
 
 # --------------------------------------------------------------------------- #
@@ -571,7 +583,7 @@ def test_gpc_loop_run_structure():
 
     class _GPCPosterior(_NoGridPosterior):
         def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
-            return cov(beta)
+            return cov(beta), 10.0, 10
 
     n_iterations = 20
     start = 0.3
@@ -579,9 +591,11 @@ def test_gpc_loop_run_structure():
         _GPCPosterior(), initial_beta=start, method="gpc",
         alpha=0.05, B=1, n_iterations=n_iterations, max_log_step=0.25, beta_min=0.01,
     )
-    # one beta and one coverage recorded per iteration
+    # one beta, one coverage and one ESS recorded per iteration
     assert len(hist["betas"]) == n_iterations
     assert len(hist["coverages"]) == n_iterations
+    assert len(hist["ess"]) == n_iterations
+    assert all(e == 10.0 for e in hist["ess"])
     # returned beta is the last one in the history and is positive
     assert beta == hist["betas"][-1]
     assert beta > 0.0
@@ -622,46 +636,48 @@ def test_grid_search_selection_is_closest_to_target():
     grid = [0.1, 1.0, 10.0]
 
     # a point exactly on the target must beat points off target
-    beta, hist = run_grid_search(grid, lambda b: TARGET - 0.05 * abs(math.log10(b)),
+    beta, hist = run_grid_search(grid, lambda b: (TARGET - 0.05 * abs(math.log10(b)), 1.0, 10),
                                  target_coverage=TARGET, beta_min=0.01)
     assert beta == 1.0
-    # history carries the whole grid in order with one coverage per point
+    # history carries the whole grid in order with one coverage and ESS per point
     assert hist["betas"] == grid
     assert len(hist["coverages"]) == len(grid)
+    assert len(hist["ess"]) == len(grid)
 
     # off-target: the closest point wins (0.1 is at gap 0.05, 10.0 at gap 0.9)
-    beta, _ = run_grid_search(grid, lambda b: {0.1: 0.9, 1.0: 0.1, 10.0: 0.05}[b],
+    beta, _ = run_grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 0.1, 10.0: 0.05}[b], 2.0, 10),
                               target_coverage=TARGET, beta_min=0.01)
     assert beta == 0.1
 
     # tie in |gap|: documented tie-break prefers the larger beta
-    beta, _ = run_grid_search(grid, lambda b: {0.1: 0.9, 1.0: 1.0, 10.0: 0.9}[b],
+    beta, _ = run_grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 1.0, 10.0: 0.9}[b], 2.0, 10),
                               target_coverage=TARGET, beta_min=0.01)
     assert beta == 10.0
     # tie in |gap| and side: the higher coverage wins (0.9 > 0.0, 0.1 > 1.0)
-    beta, _ = run_grid_search(grid, lambda b: {0.1: 0.9, 1.0: 0.0, 10.0: 0.0}[b],
+    beta, _ = run_grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 0.0, 10.0: 0.0}[b], 2.0, 10),
                               target_coverage=TARGET, beta_min=0.01)
     assert beta == 0.1
 
     # constant coverage: history still carries the grid in order
-    _, hist = run_grid_search(grid, lambda b: 0.5, target_coverage=TARGET,
+    _, hist = run_grid_search(grid, lambda b: (0.5, 3.0, 10), target_coverage=TARGET,
                               beta_min=0.01)
     assert hist["betas"] == grid and len(hist["coverages"]) == len(grid)
+    assert hist["ess"] == [3.0] * len(grid)
 
     # floor at beta_min
-    beta, _ = run_grid_search([0.001], lambda b: TARGET, target_coverage=TARGET,
+    beta, _ = run_grid_search([0.001], lambda b: (TARGET, 1.0, 10), target_coverage=TARGET,
                               beta_min=0.01)
     assert beta == 0.01
     # non-positive grid values are rejected
     with pytest.raises(ValueError, match="positive"):
-        run_grid_search([-1.0, 1.0], lambda b: 0.5, target_coverage=TARGET,
+        run_grid_search([-1.0, 1.0], lambda b: (0.5, 1.0, 10), target_coverage=TARGET,
                         beta_min=0.01)
 
 
 def test_grid_start_refines_crossing_and_extracts_slope_and_bracket():
     # coverage monotonically decreasing in beta, crossing the target at b=10^0.8
     # (1.35 - 0.5*log10(b) = 0.95 -> log10(b) = 0.8 -> b ~= 6.31, inside [1, 10])
-    cov = lambda b: 1.35 - 0.5 * math.log10(b)
+    cov = lambda b: (1.35 - 0.5 * math.log10(b), 4.0, 10)
     start, slope, bracket, hist = grid_start(
         [0.1, 1.0, 10.0], cov, target_coverage=TARGET, beta_min=0.01, refine_steps=3)
     # crossing is bracketed between 1.0 and 10.0; refinement stays inside
@@ -671,14 +687,17 @@ def test_grid_start_refines_crossing_and_extracts_slope_and_bracket():
     assert math.log(1.0) <= bracket[0] < bracket[1] <= math.log(10.0)
     # interpolated crossing is between the bracket endpoints
     assert bracket[0] <= math.log(start) <= bracket[1]
-    # all grid points plus the refinement mids are in the history
+    # all grid points plus the refinement mids are in the history, with
+    # one coverage and ESS per evaluated point
     assert len(hist["betas"]) == 3 + 3
+    assert len(hist["coverages"]) == len(hist["betas"])
+    assert hist["ess"] == [4.0] * len(hist["betas"])
     # no crossing: all above target -> largest grid value
-    start, slope, bracket, _ = grid_start([0.1, 1.0], lambda b: 0.99,
+    start, slope, bracket, _ = grid_start([0.1, 1.0], lambda b: (0.99, 4.0, 10),
                                           target_coverage=TARGET, beta_min=0.01)
     assert start == 1.0 and slope is None and bracket is None
     # no crossing: all below target -> smallest grid value
-    start, slope, bracket, _ = grid_start([0.1, 1.0], lambda b: 0.01,
+    start, slope, bracket, _ = grid_start([0.1, 1.0], lambda b: (0.01, 4.0, 10),
                                           target_coverage=TARGET, beta_min=0.01)
     assert start == 0.1 and slope is None and bracket is None
 
@@ -692,7 +711,7 @@ class _NoGridPosterior:
         pass
 
     def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
-        return 0.5
+        return 0.5, 10.0, 10
 
 
 class _GridPosterior(_NoGridPosterior):
@@ -752,14 +771,17 @@ def test_array_initial_beta_adds_history_extras():
 
     class _CrossingPosterior(_GridPosterior):
         def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
-            return cov(beta)
+            return cov(beta), 5.0, 10
 
     beta, hist = calibrate_beta(_CrossingPosterior(), initial_beta=np.array([0.1, 1.0, 10.0]),
                                 method="gpc", alpha=0.05, B=1, n_iterations=2, beta_min=0.01)
-    assert set(hist) >= {"betas", "coverages", "grid", "initial_beta", "slope"}
+    assert set(hist) >= {"betas", "coverages", "ess", "grid", "initial_beta", "slope"}
     assert len(hist["betas"]) == 2 and len(hist["coverages"]) == 2
+    assert len(hist["ess"]) == 2
     assert 1.0 < hist["initial_beta"] < 10.0
     assert hist["slope"] < 0
+    # the grid history (grid plus refinement mids) carries one ESS per point
+    assert len(hist["grid"]["ess"]) == len(hist["grid"]["betas"])
 
 
 def test_grid_method_returns_grid_point():
@@ -769,7 +791,7 @@ def test_grid_method_returns_grid_point():
 
     class _GridOnlyPosterior(_GridPosterior):
         def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
-            return cov(beta)
+            return cov(beta), 7.0, 10
 
     beta, hist = calibrate_beta(_GridOnlyPosterior(),
                                 initial_beta=np.array([0.1, 1.0, 10.0]),
@@ -778,6 +800,7 @@ def test_grid_method_returns_grid_point():
     assert beta == 10.0
     assert hist["betas"] == [0.1, 1.0, 10.0]  # grid history, not loop history
     assert len(hist["coverages"]) == 3
+    assert hist["ess"] == [7.0] * 3
 
 
 # ---------------------------------------------------------------------------

@@ -319,9 +319,9 @@ class GeneralPosterior:
             Observed data of shape ``(n, d_x)`` (unused by the general
             method; the posterior holds its own copy).
         ess_threshold : float, default 0.3
-            If the mean effective sample size of the importance weights
-            falls below ``ess_threshold * M``, the pool is redrawn at the
-            current ``beta`` inside :meth:`estimate_coverage`.
+            Threshold for the caller (typically the calibration loop) to
+            decide whether the MCMC pool should be refreshed at the next
+            :meth:`estimate_coverage` call.
 
         Notes
         -----
@@ -341,7 +341,7 @@ class GeneralPosterior:
                           alpha: float,
                           B: int,
                           x_obs: Tensor = None,
-                          ess_threshold: float = 0.3) -> float:
+                          ess_threshold: float = 0.3) -> tuple[float, float, int]:
         """Empirical bootstrap coverage at ``beta``.
 
         Draws ``B`` multinomial bootstrap count vectors, importance-reweights
@@ -349,13 +349,11 @@ class GeneralPosterior:
         resample, and returns the fraction of resamples whose weighted
         ``1 - alpha`` ellipsoid contains ``theta_hat``.
 
-        If the mean effective sample size of the weight matrix falls below
-        ``ess_threshold * M``, the pool is redrawn at the *updated*
-        ``beta = exp(clip(log(beta) + k * (coverage - (1 - alpha)),
-        ±max_log_step))`` with the loop's step
-        ``k = 10 / (10 + B)``, and the cached samples and losses are
-        refreshed from the new pool -- the same rejuvenation the
-        calibration loop used to perform after every coverage call.
+        The mean effective sample size (ESS) of the importance weight matrix
+        is also returned so the caller (the calibration loop) can decide
+        whether to refresh the MCMC pool.  ``estimate_coverage`` itself does
+        **not** mutate the pool; pool refreshes are an explicit operation
+        driven by the caller.
 
         Parameters
         ----------
@@ -369,13 +367,18 @@ class GeneralPosterior:
         x_obs : torch.Tensor, optional
             Observed data (unused by the general method).
         ess_threshold : float, default 0.3
-            Rejuvenation trigger, see :meth:`prepare_calibration`.
+            Unused by this method (the caller uses the returned ESS to make
+            the refresh decision); kept for interface consistency.
 
         Returns
         -------
-        float
+        cov : float
             Fraction of resamples whose weighted ellipsoid covers
             ``theta_hat``.
+        ess_mean : float
+            Mean effective sample size of the importance weights.
+        M : int
+            Size of the base MCMC pool (``len(theta_samples)``).
 
         Raises
         ------
@@ -412,19 +415,7 @@ class GeneralPosterior:
         )
         cov = cover / B
 
-        # --- ESS-gated refresh: redraw the pool when the weights degenerate ---
+        # --- ESS diagnostic (caller uses this to decide whether to refresh) ---
         ess_mean = (1.0 / (W**2).sum(dim=1)).mean().item()
-        if ess_mean < ess_threshold * M:
-            # The loop's SA step applied to this coverage estimate.
-            k_t = 10.0 / (10 + B)
-            log_step = max(-0.25, min(0.25, k_t * (cov - (1.0 - alpha))))
-            beta_new = float(math.exp(math.log(beta) + log_step))
-            _log.debug(
-                "ESS %.3f < %.3f * %d: refreshing MCMC pool at beta %.4f",
-                ess_mean, ess_threshold, M, beta_new,
-            )
-            self.theta_samples = self.sample(beta_new).to(device=device, dtype=dtype)
-            self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
-            self.beta_base = beta_new
 
-        return cov
+        return cov, ess_mean, M
