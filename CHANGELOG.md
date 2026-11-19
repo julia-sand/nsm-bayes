@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Behaviour change:** `_iterative_loop` in `nsm_bayes.inference.beta_calibration_loop` no longer refreshes the MCMC pool on the final calibration iteration (`t == n_iterations - 1`). The pool drawn on the last iteration has no downstream consumer (calibration ends immediately after), so the previous refresh was wasted MCMC cost. All earlier iterations are unaffected, so results for a fixed seed are bit-identical whenever the ESS-gated refresh is not triggered on the final iteration; when it *was* triggered, only the unused final pool draw is skipped and the returned `log_beta` is unchanged. Covered by `tests/test_units.py::test_pool_not_refreshed_on_final_iteration`.
 - **Breaking change:** `nsm_bayes.inference.beta_calibration_loop.calibrate_beta` now validates its keyword arguments strictly: any keyword not in the signature (including misspellings such as `init_beta`, `beta_minimum` or `num_bootstrap`) raises `TypeError` immediately, instead of being silently ignored (the old special-case `TypeError`s for `beta_init` / `step_schedule` are unchanged). No in-repo caller passes such keywords, so experiment results are bit-identical. Covered by `tests/test_units.py::test_unknown_kwargs_raise_type_error`.
 
 ### Added

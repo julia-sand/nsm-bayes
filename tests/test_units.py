@@ -474,6 +474,47 @@ def test_refresh_pool_updates_state():
     assert not torch.allclose(old_samples, p.theta_samples)
 
 
+def test_pool_not_refreshed_on_final_iteration():
+    """The last iteration's refresh is a no-op: no downstream consumer uses
+    the pool afterwards, so the loop skips it to save MCMC cost.
+
+    Force ESS below the threshold on *every* call to ``estimate_coverage``.
+    With ``n_iterations`` calls, only the first ``n_iterations - 1`` may
+    trigger a refresh.
+    """
+    refresh_calls: list[float] = []
+
+    class _AlwaysLowESSPosterior(_FlatGeneralPosterior):
+        def __init__(self, n=10, d=2):
+            super().__init__(n=n, d=d)
+            self.refresh_calls = refresh_calls
+
+        def estimate_coverage(self, beta, alpha, B, x_obs=None,
+                              ess_threshold=0.3):
+            # Always report ESS below threshold so the refresh branch is
+            # taken on every iteration that gets past the guard.
+            cov, _, pool = super().estimate_coverage(
+                beta, alpha, B, x_obs=x_obs, ess_threshold=ess_threshold)
+            return cov, 0.05 * pool, pool
+
+        def refresh_pool(self, beta):
+            self.refresh_calls.append(beta)
+            self.theta_samples = self.sample(beta)
+            self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
+            self.beta_base = beta
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(general_posterior, "bootstrap_coverage_indicator",
+                   lambda *a, **k: 1)
+        post = _AlwaysLowESSPosterior()
+        calibrate_beta(post, initial_beta=BETA_START, B=5, n_iterations=N_ITER,
+                       beta_min=BETA_MIN)
+
+    # Exactly n_iterations - 1 refreshes: the final iteration must be skipped.
+    assert len(post.refresh_calls) == N_ITER - 1
+    assert all(math.isfinite(b) and b > 0 for b in post.refresh_calls)
+
+
 def test_refresh_pool_requires_theta_hat():
     """refresh_pool raises RuntimeError when theta_hat has not been set."""
     p = _RefreshTestPosterior()

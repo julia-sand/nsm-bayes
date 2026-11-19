@@ -126,7 +126,9 @@ def _iterative_loop(
     which returns the updated ``log(beta)``.  When the returned ESS drops
     below ``ess_threshold * pool_size``, the pool is refreshed via
     ``posterior.refresh_pool`` at a small local step around the current
-    coverage (see :meth:`GeneralPosterior.refresh_pool`).
+    coverage (see :meth:`GeneralPosterior.refresh_pool`).  The refresh is
+    skipped after the final iteration, where the redrawn pool would never be
+    used by another coverage estimate.
 
     Parameters
     ----------
@@ -176,7 +178,11 @@ def _iterative_loop(
         # rate -- so the refresh beta is a small local step around the
         # current coverage, independent of t.  Mirrors the historical
         # behaviour of estimate_coverage's internal refresh.
-        if pool_size > 0 and ess < ess_threshold * pool_size:
+        # Skipped after the final iteration: the refreshed pool would only be
+        # used by a coverage estimate that is never drawn, so the redraw is
+        # pure waste (the calibrated beta is unaffected either way).
+        if (t < n_iterations - 1
+                and pool_size > 0 and ess < ess_threshold * pool_size):
             k_t = 10.0 / (10.0 + B)
             log_step = max(-max_log_step, min(max_log_step,
                                               k_t * (c_hat - target)))
