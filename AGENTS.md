@@ -207,9 +207,6 @@ change and must go in the CHANGELOG.
   `(M, d_theta)`) for every array argument and return. Keep docstrings in sync
   with signatures (several are currently stale — fix them when you touch the
   function).
-- Use `logging.getLogger(__name__)` for diagnostics. Some calibration code
-  still uses `print`/`tqdm`; prefer logging in new code and don't add more
-  prints to library modules.
 - Don't leave commented-out code or `#is this intentional?` notes in
   committed library code; open an issue or note it in the PR instead.
 - Keep imports pointing at the real module (`nsm_bayes.utils.linalg`, not a

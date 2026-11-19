@@ -15,7 +15,7 @@ from typing import Any
 
 from nsm_bayes.inference.beta_update_rules import (
     grid_start,
-    run_grid_search,
+    best_beta_from_grid,
     step_bisect,
     step_gpc,
 )
@@ -163,32 +163,23 @@ def _iterative_loop(
     """
     step_fn = {"bisect": step_bisect}.get(method, step_gpc)
 
+    #store betas, coverages, ess's
     betas: list[float] = []
     coverages: list[float] = []
     ess_list: list[float] = []
+
     for t in range(n_iterations):
         beta = math.exp(log_beta)
+
+        #estimate coverage
         c_hat, ess, pool_size = posterior.estimate_coverage(
             beta, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
         )
+        
         c_hat = float(c_hat)
         ess_list.append(float(ess))
-        # ESS-gated pool refresh (normflow only; conjugate ESS is inf).
-        # Uses the fixed rate k_t = 10/(10+B) -- not the iteration-indexed
-        # rate -- so the refresh beta is a small local step around the
-        # current coverage, independent of t.  Mirrors the historical
-        # behaviour of estimate_coverage's internal refresh.
-        # Skipped after the final iteration: the refreshed pool would only be
-        # used by a coverage estimate that is never drawn, so the redraw is
-        # pure waste (the calibrated beta is unaffected either way).
-        if (t < n_iterations - 1
-                and pool_size > 0 and ess < ess_threshold * pool_size):
-            k_t = 10.0 / (10.0 + B)
-            log_step = max(-max_log_step, min(max_log_step,
-                                              k_t * (c_hat - target)))
-            beta_refresh = math.exp(max(log_beta + log_step, math.log(beta_min)))
-            posterior.refresh_pool(beta_refresh)
 
+        #compute new log beta using stepping method
         if method == "bisect":
             log_beta, bracket = step_fn(
                 log_beta, c_hat, t,
@@ -204,8 +195,25 @@ def _iterative_loop(
                 beta_min=beta_min,
                 target_coverage=target,
             )
+        
         betas.append(math.exp(log_beta))
         coverages.append(c_hat)
+        print(rf"For $\beta=${betas[-1]}, Coverage is {coverages[-1]}")
+
+        # ESS-gated pool refresh (normflow only; conjugate ESS is always inf, so will be skipped).
+        # Uses fixed rate k_t = 10/(10+B), so the refresh beta is a small local step around the
+        # current coverage, independent of t.
+        # Skipped after the final iteration: the refreshed pool would only be
+        # used by a coverage estimate that is never drawn.
+        
+        if (t < n_iterations - 1
+                and pool_size > 0 and ess < ess_threshold * pool_size):
+            k_t = 10.0 / (10.0 + B)
+            log_step = max(-max_log_step, min(max_log_step,
+                                              k_t * (c_hat - target)))
+            beta_refresh = math.exp(max(log_beta + log_step, math.log(beta_min)))
+            posterior.refresh_pool(beta_refresh)
+
     return math.exp(log_beta), betas, coverages, ess_list, bracket
 
 
@@ -305,12 +313,6 @@ def calibrate_beta(
 
     target = 1 - alpha
 
-    for old in ("beta_init", "step_schedule"):
-        if old in kwargs:
-            raise TypeError(
-                f"calibrate_beta() got an unexpected keyword argument {old!r} "
-                "(renamed to initial_beta; step schedules are set by the method)"
-            )
 
     if kwargs:
         raise TypeError(
@@ -320,6 +322,9 @@ def calibrate_beta(
     #validate the inputs for compatibility methods
     is_array, grid, scalar_start = _validate_initial_beta(initial_beta)
     _validate_method(method, posterior, is_array)
+
+    #save history
+    history: dict[str, Any] = {"betas": [], "coverages": []}
 
     if is_array:
         # One-time setup before any coverage call: theta_hat (and, for the
@@ -340,6 +345,13 @@ def calibrate_beta(
             beta_min=beta_min,
             refine_steps=refine_steps,
         )
+        if method=="grid":
+            history["betas"] = grid_history["betas"]
+            history["coverages"] = grid_history["coverages"]              
+            history["ess"] = grid_history["ess"]
+
+            beta = best_beta_from_grid(grid,history)
+            return beta, history
     else:
         start, slope, bracket, grid_history = scalar_start, None, None, None
 
@@ -349,37 +361,23 @@ def calibrate_beta(
             start, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
         )
 
-    history: dict[str, Any] = {"betas": [], "coverages": []}
     if is_array:
         history["grid"] = grid_history
         history["initial_beta"] = start
 
-    if method == "grid":
-        beta, grid_hist = run_grid_search(
-            grid,
-            lambda beta: posterior.estimate_coverage(
-                beta, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
-            ),
-            target_coverage=target,
-            beta_min=beta_min,
+    beta, betas, coverages, ess_list, final_bracket = _iterative_loop(
+        posterior, x_obs, math.log(start), bracket,
+        method=method, target=target, B=B, n_iterations=n_iterations,
+        alpha=alpha, max_log_step=max_log_step, beta_min=beta_min,
+        ess_threshold=ess_threshold,
+    )
+    history["betas"] = betas
+    history["coverages"] = coverages
+    history["ess"] = ess_list
+    if final_bracket is not None:
+        history["bracket"] = (
+            math.exp(final_bracket[0]), math.exp(final_bracket[1])
         )
-        history["betas"] = grid_hist["betas"]
-        history["coverages"] = grid_hist["coverages"]
-        history["ess"] = grid_hist["ess"]
-    else:
-        beta, betas, coverages, ess_list, final_bracket = _iterative_loop(
-            posterior, x_obs, math.log(start), bracket,
-            method=method, target=target, B=B, n_iterations=n_iterations,
-            alpha=alpha, max_log_step=max_log_step, beta_min=beta_min,
-            ess_threshold=ess_threshold,
-        )
-        history["betas"] = betas
-        history["coverages"] = coverages
-        history["ess"] = ess_list
-        if final_bracket is not None:
-            history["bracket"] = (
-                math.exp(final_bracket[0]), math.exp(final_bracket[1])
-            )
 
     if slope is not None:
         history["slope"] = slope

@@ -15,7 +15,7 @@ from collections.abc import Callable
 
 __all__ = [
     "step_gpc", "step_bisect",
-    "run_grid_search", "grid_start",
+    "best_beta_from_grid", "grid_start",
 ]
 
 
@@ -119,10 +119,9 @@ def step_bisect(
     return max(0.5 * (lo + hi), math.log(beta_min)), updated_bracket
 
 
-def run_grid_search(
-    grid: list[float],
-    coverage_fn: Callable[[float], tuple[float, float, int]],
-    *,
+def best_beta_from_grid(
+    grid,
+    history,
     target_coverage: float,
     beta_min: float,
 ) -> tuple[float, dict[str, list[float]]]:
@@ -144,20 +143,24 @@ def run_grid_search(
         in increasing order and its coverages and mean effective sample
         sizes.
     """
-    if grid[0] <= 0:
-        raise ValueError("initial_beta grid must contain positive values")
+    
+    #compute coverage and ess at each gridpoint
+    covs = history["covariances"]
+    
+    gaps = [abs(c - target_coverage) for c in covs]
+    best = min(range(len(grid)), key=lambda i: (gaps[i], -covs[i], -grid[i]))
+    return max(grid[best], beta_min)
+
+def coverage_on_grid(grid,coverage_fn):
 
     covs, esss = [], []
     for b in grid:
         cov, ess, _ = coverage_fn(b)
+        print(rf"For $\beta=${b}, Coverage is {cov}")
         covs.append(float(cov))
         esss.append(float(ess))
-    gaps = [abs(c - target_coverage) for c in covs]
-    best = min(range(len(grid)), key=lambda i: (gaps[i], -covs[i], -grid[i]))
-    return max(grid[best], beta_min), {
-        "betas": list(grid), "coverages": covs, "ess": esss,
-    }
 
+    return covs,esss
 
 def grid_start(
     grid: list[float],
@@ -198,11 +201,13 @@ def grid_start(
     if not grid or grid[0] <= 0:
         raise ValueError("initial_beta grid must contain positive values")
 
-    covs, esss = [], []
-    for b in grid:
-        cov, ess, _ = coverage_fn(b)
-        covs.append(float(cov))
-        esss.append(float(ess))
+    covs, esss = coverage_on_grid(grid,coverage_fn)
+    
+    #for b in grid:
+    #    cov, ess, _ = coverage_fn(b)
+    #    covs.append(float(cov))
+    #    esss.append(float(ess))
+    
     seen = dict(zip(grid, covs))  # every evaluated beta -> coverage
     seen_ess = dict(zip(grid, esss))  # every evaluated beta -> ess
 
