@@ -1,16 +1,16 @@
 """Regression tests for the g-and-k experiment (normflow variant).
 
 Checks that the contamination is applied exactly as configured, that the
-posterior artifacts are present and structurally valid, and that the data
-files are bit-identical to the ones the conjugate variant writes for the
-same seed.
+posterior artifacts are present and structurally valid, that the data files
+are bit-identical to the ones the conjugate variant writes for the same
+seed, and that a different seed changes the data.
 """
 import pytest
 import torch
 
 from nsm_bayes.experiments import common, gnk
 from nsm_bayes.utils import set_seed
-from tests.conftest import assert_posterior_artifacts
+from tests.conftest import assert_posterior_artifacts, load_tensor
 
 
 @pytest.fixture
@@ -19,6 +19,34 @@ def gnk_run(gnk_cfg, tmp_path):
     save_dir = tmp_path / "gnk"
     common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, save_dir)
     return save_dir
+
+
+def _generate(gnk_cfg, seed):
+    """One repetition of the data, generated exactly as ``run_experiment``
+    does it for rep 0 (same seed and call order), without running a method."""
+    sim, _, theta_true = gnk.build_problem(gnk_cfg)
+    set_seed(seed)
+    return gnk.generate_data(sim, theta_true, gnk_cfg)
+
+
+def test_gnk_data_identical_across_methods(gnk_cfg, tmp_path):
+    """Both method variants produce identical data for the same seed."""
+    nf_dir = tmp_path / "gnk_nf"
+    cj_dir = tmp_path / "gnk_cj"
+    common.run_experiment(gnk_cfg, gnk, common.run_normflow_methods, nf_dir)
+    common.run_experiment(gnk_cfg, gnk, common.run_conjugate_method, cj_dir)
+    for name in ("theta", "x_sim", "x_obs", "x_obs_mis", "outlier_indices"):
+        assert torch.equal(load_tensor(nf_dir, f"{name}_0.pkl"),
+                           load_tensor(cj_dir, f"{name}_0.pkl")), f"{name} differs"
+
+
+def test_gnk_data_changes_with_seed(gnk_cfg):
+    """A different seed must give different data (seeding still wired up)."""
+    d0 = _generate(gnk_cfg, gnk_cfg.seed_offset)
+    d1 = _generate(gnk_cfg, gnk_cfg.seed_offset + 1)
+    assert not torch.equal(d0.theta, d1.theta)
+    assert not torch.equal(d0.x_sim, d1.x_sim)
+    assert not torch.equal(d0.x_obs_mis, d1.x_obs_mis)
 
 
 def test_gnk_observed_data(gnk_cfg):

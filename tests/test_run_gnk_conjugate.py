@@ -3,7 +3,8 @@
 The full pipeline is exercised end to end through
 ``scripts.conjugate.run_gnk._run`` with a tiny config (see
 :mod:`tests.conftest` for the fast NLE/score-matching stand-ins).
-The data files must also be bit-identical to the normflow variant's.
+Cross-method data identity with the normflow variant is checked in
+:mod:`tests.test_run_gnk`.
 """
 import pytest
 import torch

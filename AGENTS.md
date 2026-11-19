@@ -80,9 +80,10 @@ iterating, and the full suite before you finish.
 1. **Data before training.** `run_experiment` seeds, generates *all* data
    for a repetition (training + observed), saves it, and only then calls the
    method step. This is what makes the normflow and conjugate variants
-   see **bit-identical data** for the same seed, and the
-   `test_*_data_identical_across_methods` tests enforce it. Never draw random
-   numbers for data inside a method step, and never reorder RNG calls inside
+   see **bit-identical data** for the same seed, and
+   `tests/test_run_gnk.py::test_gnk_data_identical_across_methods` enforces it.
+   Never draw random numbers for
+   data inside a method step, and never reorder RNG calls inside
    `generate_data` without expecting every saved dataset to change.
 2. **Seeding.** One call to `nsm_bayes.utils.set_seed(cfg.seed_offset + rep)`
    per repetition (seeds `numpy` and `torch`). Don't add ad hoc
@@ -180,8 +181,11 @@ change and must go in the CHANGELOG.
   like `condition=`), update `_StubNLE` to match the real sbi surface.
 - Tests assert structure and sanity, not exact numbers: shapes, finiteness,
   symmetric PD covariance, `β ≥ beta_min`, history keys, cross-method data
-  identity, and `test_*_model_data_changes_with_seed` (a different seed must
-  give different data).
+  identity (`tests/test_run_gnk.py::test_gnk_data_identical_across_methods`),
+  and `tests/test_run_gnk.py::test_gnk_data_changes_with_seed` (a different
+  seed must give different data). Experiment-specific data invariants
+  (e.g. `test_gnk_observed_data`, `test_sir_uc_undercounting_is_one_sided`)
+  call `generate_data` directly instead of re-running the pipeline.
 - `tests/test_units.py` holds known-answer unit tests: g-and-k quantiles vs
   the closed form, SIR parameter transforms, weighted moments vs sample
   moments, jacobians/Laplacians on quadratics vs the analytic answer, the

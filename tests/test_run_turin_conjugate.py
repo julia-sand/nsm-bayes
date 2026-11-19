@@ -1,8 +1,7 @@
 """Regression tests for the Turin channel-model experiment (conjugate variant).
 
 The full pipeline is exercised end to end with a tiny config (see
-:mod:`tests.conftest` for the fast stand-ins).  The data files must be
-bit-identical to the normflow variant's for the same seed.
+:mod:`tests.conftest` for the fast stand-ins).
 """
 import pytest
 import torch
