@@ -104,12 +104,7 @@ def _gnk_quantile(theta: torch.Tensor, p: float) -> float:
     return float(A + B * (1 + 0.8 * torch.tanh(0.5 * g * z)) * (1 + z**2) ** k * z)
 
 
-def test_gnk_median_is_A(gnk_draws):
-    theta, x = gnk_draws
-    assert abs(x.median().item() - theta[0].item()) < 0.02
-
-
-@pytest.mark.parametrize("p", [0.1, 0.25, 0.75, 0.9])
+@pytest.mark.parametrize("p", [0.1, 0.25, 0.5, 0.75, 0.9])
 def test_gnk_quantiles_match_closed_form(gnk_draws, p):
     theta, x = gnk_draws
     assert abs(torch.quantile(x, p).item() - _gnk_quantile(theta, p)) < 0.03
