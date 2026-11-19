@@ -73,7 +73,7 @@ def generate_data(
     """
     theta, x_sim = sim.generate_training_data(cfg.num_samples)
     
-    x_obs_mis = sim.generate_observed_data(
+    x_obs_mis = sim.generate_contaminated_data(
         theta_true, n_obs=cfg.n_obs, epsilon=cfg.epsilon
     )
 
