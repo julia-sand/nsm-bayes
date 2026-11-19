@@ -122,9 +122,11 @@ def _iterative_loop(
     """Run the shared iteration loop under the selected update rule.
 
     Each iteration estimates the coverage at the current ``beta`` through
-    ``posterior.estimate_coverage`` (which, for the general method, also
-    performs the ESS-gated pool refresh) and hands the coverage to the
-    rule, which returns the updated ``log(beta)``.
+    ``posterior.estimate_coverage`` and hands the coverage to the rule,
+    which returns the updated ``log(beta)``.  When the returned ESS drops
+    below ``ess_threshold * pool_size``, the pool is refreshed via
+    ``posterior.refresh_pool`` at a small local step around the current
+    coverage (see :meth:`GeneralPosterior.refresh_pool`).
 
     Parameters
     ----------
@@ -164,11 +166,23 @@ def _iterative_loop(
     ess_list: list[float] = []
     for t in range(n_iterations):
         beta = math.exp(log_beta)
-        c_hat, ess, _ = posterior.estimate_coverage(
+        c_hat, ess, pool_size = posterior.estimate_coverage(
             beta, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
         )
         c_hat = float(c_hat)
         ess_list.append(float(ess))
+        # ESS-gated pool refresh (normflow only; conjugate ESS is inf).
+        # Uses the fixed rate k_t = 10/(10+B) -- not the iteration-indexed
+        # rate -- so the refresh beta is a small local step around the
+        # current coverage, independent of t.  Mirrors the historical
+        # behaviour of estimate_coverage's internal refresh.
+        if pool_size > 0 and ess < ess_threshold * pool_size:
+            k_t = 10.0 / (10.0 + B)
+            log_step = max(-max_log_step, min(max_log_step,
+                                              k_t * (c_hat - target)))
+            beta_refresh = math.exp(max(log_beta + log_step, math.log(beta_min)))
+            posterior.refresh_pool(beta_refresh)
+
         if method == "bisect":
             log_beta, bracket = step_fn(
                 log_beta, c_hat, t,

@@ -335,6 +335,43 @@ class GeneralPosterior:
         theta_init = self.theta_samples.mean(dim=0)
         self.theta_hat = self.compute_theta_hat_true(theta_init=theta_init)
 
+    def refresh_pool(self, beta: float) -> None:
+        """Resample the MCMC pool at ``beta`` and update cached quantities.
+
+        Call this when the importance-weight ESS drops below the threshold
+        during calibration (see
+        :func:`nsm_bayes.inference.beta_calibration_loop.calibrate_beta`).
+        Redraws ``self.theta_samples`` at the new ``beta``, recomputes
+        ``per_x_losses``, and sets ``self.beta_base`` so subsequent
+        importance-reweighting calls use the refreshed pool as reference.
+
+        Parameters
+        ----------
+        beta : float
+            The (updated) ``beta`` at which to resample the pool.
+
+        Raises
+        ------
+        RuntimeError
+            If ``prepare_calibration`` has not been called first.
+        """
+        if self.theta_hat is None:
+            raise RuntimeError(
+                "GeneralPosterior.refresh_pool requires "
+                "prepare_calibration to be called first"
+            )
+        device = self.x_obs.device
+        dtype = self.x_obs.dtype
+        new_samples = self.sample(beta).to(device=device, dtype=dtype)
+        self.ell, self.L_orig = self.per_x_losses(new_samples)
+        self.theta_samples = new_samples
+        self.beta_base = float(beta)
+        _log.debug(
+            "refresh_pool: resampled %d samples at beta %.4f",
+            new_samples.shape[0], beta,
+        )
+
+
     @torch.no_grad()
     def estimate_coverage(self,
                           beta: float,

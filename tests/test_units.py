@@ -292,11 +292,9 @@ class _FlatGeneralPosterior:
         return torch.zeros(self.d)
 
     def sample(self, beta):
-        # Base-pool draw at beta_init (done once by prepare_calibration);
-        # the weights never degenerate here, so estimate_coverage must not
-        # resample.
-        if beta != BETA_START:
-            raise AssertionError("no resampling should happen at a later beta")
+        # Called once at beta_init by prepare_calibration and, in the
+        # refresh tests, again by refresh_pool at the updated beta; accept
+        # either.
         return torch.randn(50, self.d)
 
     def prepare_calibration(self, beta, alpha, B, x_obs=None,
@@ -325,6 +323,13 @@ class _FlatGeneralPosterior:
         ess_mean = (1.0 / (W ** 2).sum(dim=1)).mean().item()
         assert ess_mean >= ess_threshold * self.theta_samples.shape[0]
         return cover / B, ess_mean, self.theta_samples.shape[0]
+
+    def refresh_pool(self, beta):
+        # With flat losses ESS never drops, so this is never called in the
+        # default tests; implement it for completeness.
+        self.theta_samples = self.sample(beta)
+        self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
+        self.beta_base = beta
 
 
 class _FixedConjugatePosterior:
@@ -418,6 +423,113 @@ def test_calibration_history_records_ess(calibration_run):
     covered, hist = calibration_run
     assert len(hist["ess"]) == N_ITER
     assert all(e >= 0.0 for e in hist["ess"])
+
+
+# --------------------------------------------------------------------------- #
+# 11b. GeneralPosterior.refresh_pool                                          #
+# --------------------------------------------------------------------------- #
+
+class _RefreshTestPosterior:
+    """Minimal stand-in exposing the same attributes and methods as
+    GeneralPosterior for the refresh_pool code path, without a real flow."""
+
+    def __init__(self, n=10, d=2):
+        self.x_obs = torch.zeros(n, 1)
+        self.d = d
+        self.theta_samples = torch.randn(50, d)
+        self.beta_base = 1.0
+        self.ell = torch.zeros(50, n)
+        self.L_orig = torch.zeros(50)
+        self.theta_hat = torch.zeros(d)
+        self.refresh_called = False
+        self.refresh_beta = None
+
+    def per_x_losses(self, theta):
+        return (torch.zeros(theta.shape[0], self.x_obs.shape[0]),
+                torch.zeros(theta.shape[0]))
+
+    def sample(self, beta):
+        return torch.randn(50, self.d)
+
+    def refresh_pool(self, beta):
+        # Replicates GeneralPosterior.refresh_pool using the same code path.
+        # Import the real implementation via the module.
+        from nsm_bayes.models.general.posterior import GeneralPosterior
+        GeneralPosterior.refresh_pool(self, beta)
+
+
+def test_refresh_pool_updates_state():
+    """refresh_pool resamples and recomputes losses at the new beta."""
+    p = _RefreshTestPosterior()
+    old_samples = p.theta_samples.clone()
+    old_beta_base = p.beta_base
+
+    p.refresh_pool(2.0)
+
+    assert p.beta_base == 2.0
+    assert p.theta_samples.shape == (50, p.d)
+    assert p.ell.shape == (50, p.x_obs.shape[0])
+    assert p.L_orig.shape == (50,)
+    # New samples should differ from old (random draw)
+    assert not torch.allclose(old_samples, p.theta_samples)
+
+
+def test_refresh_pool_requires_theta_hat():
+    """refresh_pool raises RuntimeError when theta_hat has not been set."""
+    p = _RefreshTestPosterior()
+    p.theta_hat = None
+    # The guard keys off theta_hat being None but the message refers to the
+    # missing prepare_calibration call.
+    with pytest.raises(RuntimeError,
+                       match="prepare_calibration to be called first"):
+        p.refresh_pool(1.0)
+
+
+def test_calibration_triggers_refresh_on_low_ess():
+    """When ESS drops below the threshold, the loop calls refresh_pool."""
+    refresh_calls = []
+
+    class _LowESSPosterior(_FlatGeneralPosterior):
+        def __init__(self, n=10, d=2):
+            super().__init__(n=n, d=d)
+            self.refresh_calls = []
+
+        def estimate_coverage(self, beta, alpha, B, x_obs=None,
+                              ess_threshold=0.3):
+            # Force low ESS on the second call to trigger a refresh.
+            if not hasattr(self, '_call_count'):
+                self._call_count = 0
+            self._call_count += 1
+            if self._call_count == 1:
+                # First call: normal high ESS
+                cov, ess, pool = super().estimate_coverage(
+                    beta, alpha, B, x_obs=x_obs, ess_threshold=ess_threshold)
+                return cov, ess, pool
+            else:
+                # Subsequent calls: force low ESS
+                cov, _, pool = super().estimate_coverage(
+                    beta, alpha, B, x_obs=x_obs, ess_threshold=ess_threshold)
+                return cov, 0.05 * pool, pool
+
+        def refresh_pool(self, beta):
+            self.refresh_calls.append(beta)
+            self.theta_samples = self.sample(beta)
+            self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
+            self.beta_base = beta
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(general_posterior, "bootstrap_coverage_indicator",
+                   lambda *a, **k: 1)
+        post = _LowESSPosterior()
+        calibrate_beta(post, initial_beta=BETA_START, B=5, n_iterations=N_ITER,
+                       beta_min=BETA_MIN)
+
+    # Refresh should have been called at least once (iterations 2..N)
+    assert len(post.refresh_calls) > 0
+    # All refresh betas must be positive and finite
+    assert all(math.isfinite(b) and b > 0 for b in post.refresh_calls)
+    # Beta base should have been updated
+    assert post.beta_base != BETA_START
 
 
 # --------------------------------------------------------------------------- #
