@@ -41,6 +41,8 @@ from nsm_bayes.utils.linalg import (
     get_non_div_term_single,
     sigma_inverse,
     get_div_term_single,
+    jacobian_and_laplacian,
+    jacobian
 )
 
 from nsm_bayes.utils.weights import weight_function
@@ -83,12 +85,12 @@ class ConjugatePosterior():
     See Also
     --------
     nsm_bayes.inference.calibrate_beta.calibrate_beta :
-        Chooses ``beta`` for :meth:`calibrated_posterior`.
+        Chooses ``beta`` for :meth:`compute_posterior`.
 
     Notes
     -----
     The data weights are recomputed from whichever data set is passed to
-    :meth:`calibrated_posterior`, so each bootstrap resample gets its own
+    :meth:`compute_posterior`, so each bootstrap resample gets its own
     robust centre and scale.
     """
 
@@ -113,10 +115,17 @@ class ConjugatePosterior():
 
         #get the normalised model's mean and variance
         self.s, self.m = self.model.standardizer_theta.std, self.model.standardizer_theta.mean
+        
         # Invert prior covariance to get prior precision
         self.prior_cov_norm = self.prior_cov / torch.outer(self.s, self.s)
         self.prior_cov_inv = sigma_inverse(self.prior_cov_norm)
         self.prior_mean_norm = self.model.standardizer_theta(self.prior_mean)
+
+
+        #for caching the differentiated values during calibration loops
+        self._calib_x_obs= None
+        self._calib_x_n = None 
+        self._calib_terms = None
 
         # Point estimate used by the beta-calibration steps
         # (see prepare_calibration). None until prepare_calibration is called.
@@ -162,7 +171,7 @@ class ConjugatePosterior():
         return mu_n,Sigma_n
 
     @torch.no_grad()
-    def calibrated_posterior(self, 
+    def compute_posterior(self, 
                 x_obs: torch.Tensor, 
                 beta: float) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute the generalised posterior at a given ``beta``.
@@ -195,99 +204,72 @@ class ConjugatePosterior():
         #x_n = self.model.standardizer_x(x_obs)
         x_n = self._normalise_input(x_obs)
 
-        mu_hat, Sigma_inv = estimate_stats(x_n, self.robust)
+        #mu_hat, Sigma_inv = estimate_stats(x_n, self.robust)
         
-        w2, grad_w2 = weight_function(self.weight_type, x_n, mu_hat, Sigma_inv)
-        
-        mu_n_normalized, Sigma_n_normalized = self._compute_posterior_conjugate(
-                    x_n,  
-                    beta,
-                    w2, 
-                    grad_w2)
+        #w2, grad_w2 = weight_function(self.weight_type, x_n, mu_hat, Sigma_inv)
+        mu_out, Sigma_out = self._posterior_from_terms(x_n, self._point_terms(x_n), beta)
+        return mu_out, Sigma_out
 
-        mu_n, Sigma_n = self._unnormalise(mu_n_normalized, Sigma_n_normalized)
-        return mu_n, Sigma_n
+    def _weights(self, x_n: Tensor) -> tuple[Tensor, Tensor]:
+        """Squared weights and their gradients for a standardised data set.
 
-    #######----Function to compute posterior precision matrix for NSM-Bayes-conj----######
-    def _compute_posterior_precision_conjugate(self, x_n: torch.Tensor, beta: float, w2: torch.Tensor) -> torch.Tensor:
-        """Posterior precision ``Sigma_0^{-1} + 2 * beta * A`` (standardised space).
+        The weight function is centred and scaled with the statistics of
+        `x_n` itself (robust or plain, see ``robust``).
 
         Parameters
         ----------
         x_n : torch.Tensor
             Standardised data of shape ``(n, d_x)``.
-        beta : float
-            Learning rate of the generalised posterior.
-        w2 : torch.Tensor
-            Squared weights ``w(x_i)^2``, shape ``(n,)``.
 
         Returns
         -------
-        torch.Tensor
-            Precision matrix of shape ``(d_theta, d_theta)``.
-        """
-        
-        # Vectorize the calculation over all observations
-        #batched_cov_terms = vmap(get_cov_term_single, in_dims=(0, None))(
-        #                                            x_obs, self.model.T_phi
-        #                                                )  # shape: (n, d_theta, d_theta)
-
-        #sum_term = (w2.view(-1, 1, 1) * batched_cov_terms).sum(dim=0)
-        A = self._compute_A(x_n,w2)
-        # Assemble the final precision matrix
-        Sigma_n_inv = self.prior_cov_inv + 2 * beta * A#sum_term
-
-        return Sigma_n_inv
-
-    def _compute_posterior_conjugate(self, x_n: torch.Tensor, beta: float, w2: torch.Tensor, grad_w2: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Posterior mean and covariance in standardised space.
-
-        Parameters
-        ----------
-        x_n : torch.Tensor
-            Standardised data of shape ``(n, d_x)``.
-        beta : float
-            Learning rate of the generalised posterior.
         w2 : torch.Tensor
-            Squared weights, shape ``(n,)``.
+            ``w(x_i)^2``, shape ``(n,)``.
         grad_w2 : torch.Tensor
-            Gradients of the squared weights, shape ``(n, d_x)``.
+            ``grad w(x_i)^2``, shape ``(n, d_x)``.
+        """
+        mu_hat, Sigma_inv = estimate_stats(x_n, self.robust)
+        return weight_function(self.weight_type, x_n, mu_hat, Sigma_inv)
+
+    def _point_terms_single(self,xi, T_phi, b_phi):
+        J, L = jacobian_and_laplacian(xi, T_phi)
+        grad_b = jacobian(xi, b_phi)
+        return J, J @ J.T, J @ grad_b, L          # J, G, c, L
+
+    def _point_terms(self, x_n: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Network terms at every standardised observation.
+
+        Parameters
+        ----------
+        x_n : torch.Tensor
+            Standardised data of shape ``(n, d_x)``.
 
         Returns
         -------
-        mu_n : torch.Tensor
-            Posterior mean, shape ``(d_theta,)``, from solving
-            ``Sigma_n^{-1} mu_n = Sigma_0^{-1} mu_0 - 2 * beta * B``.
-        Sigma_n : torch.Tensor
-            Posterior covariance, shape ``(d_theta, d_theta)``.
+        J : torch.Tensor
+            Jacobians of ``T``, shape ``(n, d_theta, d_x)``.
+        G : torch.Tensor
+            ``J_i @ J_i.T``, shape ``(n, d_theta, d_theta)``.
+        c : torch.Tensor
+            ``J_i @ grad b(x_i)``, shape ``(n, d_theta)``.
+        L : torch.Tensor
+            Laplacians of ``T``, shape ``(n, d_theta)``.
         """
+        return vmap(self._point_terms_single, in_dims=(0, None, None))(
+            x_n, self.model.T_phi, self.model.b_phi
+        )
 
-        # Compute the posterior precision matrix
-        Sigma_n_inv = self._compute_posterior_precision_conjugate(x_n, beta, w2)
-
-        B = self._compute_B(x_n,w2,grad_w2)
-
-        # Assemble the right-hand side of the linear system: Sigma_n_inv @ mu_n = rhs
-        prior_term = self.prior_cov_inv @ self.prior_mean_norm
-        rhs = prior_term - 2 * beta * (B)
-        
-        # Solve for mu_n using the stable solver.
-        mu_n = torch.linalg.solve(Sigma_n_inv, rhs)
-
-        # Compute Posterior Covariance from Precision
-        Sigma_n = sigma_inverse(Sigma_n_inv)
-        
-        return mu_n, Sigma_n
-
-    def _compute_A(self,x_n: torch.Tensor,w2: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _compute_A(w2: Tensor, G: Tensor) -> Tensor:
         """Quadratic coefficient ``A = sum_i w2_i J_T(x_i) J_T(x_i)^T``.
 
         Parameters
         ----------
-        x_n : torch.Tensor
-            Standardised data of shape ``(n, d_x)``.
         w2 : torch.Tensor
             Squared weights, shape ``(n,)``.
+        G : torch.Tensor
+            ``J_i @ J_i.T`` from :meth:`_point_terms`, shape
+            ``(n, d_theta, d_theta)``.
 
         Returns
         -------
@@ -295,57 +277,32 @@ class ConjugatePosterior():
             Symmetric positive semi-definite matrix of shape
             ``(d_theta, d_theta)``.
         """
+        return torch.einsum("i,ijk->jk", w2, G)
 
-        # A = sum_i w2_i * J_T(x_i)^T J_T(x_i)   (d_theta, d_theta)
-        # single(xi, fn) returns (J_T^T J_T, J_T); only the covariance term is kept.
-        batched_cov_terms = vmap(get_cov_term_single, in_dims=(0, None))(
-            x_n, self.model.T_phi
-        )  # (n, d_theta, d_theta)
-        A = (w2.view(-1, 1, 1) * batched_cov_terms).sum(dim=0)  # (d_theta, d_theta)
-        return A 
-
-    def _compute_B(self,x_n: torch.Tensor,w2: torch.Tensor,grad_w2: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _compute_B(w2: Tensor, grad_w2: Tensor, J: Tensor, c: Tensor, L: Tensor) -> Tensor:
         """Linear coefficient ``B`` of the summed score-matching loss.
 
-        ``B = sum_i [w2_i J_T(x_i) grad b(x_i) + J_T(x_i) grad_w2_i
-        + w2_i lap T(x_i)]``; see the module docstring.
+        ``B = sum_i [w2_i (J_T(x_i) grad b(x_i) + lap T(x_i))
+        + J_T(x_i) grad_w2_i]``; see the module docstring.
 
         Parameters
         ----------
-        x_n : torch.Tensor
-            Standardised data of shape ``(n, d_x)``.
         w2 : torch.Tensor
             Squared weights, shape ``(n,)``.
         grad_w2 : torch.Tensor
             Gradients of the squared weights, shape ``(n, d_x)``.
+        J, c, L : torch.Tensor
+            Network terms from :meth:`_point_terms`, shapes
+            ``(n, d_theta, d_x)``, ``(n, d_theta)`` and ``(n, d_theta)``.
 
         Returns
         -------
         torch.Tensor
             Vector of shape ``(d_theta,)``.
         """
+        return torch.einsum("i,ij->j", w2, c + L) + torch.einsum("ijk,ik->j", J, grad_w2)
 
-        # B = sum_i [ w2_i * div_theta log p(x_i | theta)
-        #             + grad_x w2(x_i)^T score_x(x_i) ]   (d_theta,)
-        # get_non_div_term_single(xi, fn1, fn2, Jac1, Jac2) = Jac1 @ Jac2; both
-        # Jacobians are recomputed per point and w2 is applied outside, since this
-        # helper takes no weights.
-        batched_non_div_terms = vmap(
-            get_non_div_term_single, in_dims=(0, None, None)
-        )(x_n, self.model.T_phi, self.model.b_phi)  # (n, d_theta)
-        term_non_div = (w2.view(-1, 1) * batched_non_div_terms).sum(dim=0)  # (d_theta,)
-
-        # term_div = sum_i div_x[ w(x_i)^2 * score_x(x_i) ]  (vector in R^{d_theta})
-        # get_div_term_single(xi, model, w2, grad_w2) reads model.T_phi itself and
-        # weights by w2 inside, so it is NOT re-applied when reducing below.
-        batched_divergences = vmap(get_div_term_single, in_dims=(0, None, 0, 0))(
-            x_n, self.model.T_phi, w2, grad_w2
-        )  # (n, d_theta)
-        term_div = batched_divergences.sum(dim=0)  # (d_theta,)
-
-        B = term_non_div + term_div  # (d_theta,)
-
-        return B
 
     @torch.no_grad()
     def compute_theta_hat_true(self,
@@ -378,12 +335,47 @@ class ConjugatePosterior():
         """
         x_n = self._normalise_input(x_obs)
 
-        mu_hat, Sigma_inv = estimate_stats(x_n, self.robust)
-        
-        w2, grad_w2 = weight_function(self.weight_type, x_n, mu_hat, Sigma_inv)
+        return self._theta_hat_from_terms(x_n, self._point_terms(x_n))
 
-        A = self._compute_A(x_n,w2)
-        B = self._compute_B(x_n,w2,grad_w2)
+    def _posterior_from_terms(self, x_n, terms, beta):
+        """use cached terms to compute posterior"""
+        
+        J, G, c, L = terms
+        w2, grad_w2 = self._weights(x_n)                       # estimate_stats + weight_function
+        
+        A = torch.einsum("i,ijk->jk", w2, G)
+        B = torch.einsum("i,ij->j", w2, c + L) + torch.einsum("ijk,ik->j", J, grad_w2)
+        
+        Sigma_n_inv = self.prior_cov_inv + 2 * beta * A
+        rhs = self.prior_cov_inv @ self.prior_mean_norm - 2 * beta * B
+        mu_n = torch.linalg.solve(Sigma_n_inv, rhs)
+        
+        mu_out, Sigma_out = self._unnormalise(mu_n, sigma_inverse(Sigma_n_inv))
+        return mu_out, Sigma_out
+
+    def _theta_hat_from_terms(
+        self, x_n: Tensor, terms: tuple[Tensor, Tensor, Tensor, Tensor]
+    ) -> Tensor:
+        """Score-matching minimiser from precomputed network terms.
+
+        Parameters
+        ----------
+        x_n : torch.Tensor
+            Standardised data of shape ``(n, d_x)``; used for the weights.
+        terms : tuple of torch.Tensor
+            ``(J, G, c, L)`` for the rows of `x_n`, from
+            :meth:`_point_terms`.
+
+        Returns
+        -------
+        torch.Tensor
+            ``theta_hat`` of shape ``(d_theta,)`` in original ``theta``
+            units; see :meth:`compute_theta_hat_true`.
+        """
+        J, G, c, L = terms
+        w2, grad_w2 = self._weights(x_n)
+        A = self._compute_A(w2, G)
+        B = self._compute_B(w2, grad_w2, J, c, L)
 
         # ---------- Solve A * theta_hat_true = -B ----------
         d_theta = A.shape[0]
@@ -398,6 +390,7 @@ class ConjugatePosterior():
             theta_hat_true = -torch.linalg.lstsq(A_reg, B).solution
 
         return theta_hat_true * self.s + self.m
+
 
     # ------------------------------------------------------------------ #
     # Beta calibration: the two steps driven by                           #
@@ -437,9 +430,21 @@ class ConjugatePosterior():
         Mirrors the pre-refactor behaviour of
         ``calibrate_beta_gpc``, which recomputed ``theta_hat`` on every
         call, by caching it here once instead.
-        """
-        self.theta_hat = self.compute_theta_hat_true(x_obs)
 
+        """
+        # prepare_calibration
+        x_n = self._normalise_input(x_obs)
+
+        #build jacobian and hessian cache for reuse in the whole 
+        terms = self._point_terms(x_n)            # one vmap pass over the observed points
+
+        self._calib_x_obs, self._calib_x_n, self._calib_terms = x_obs, x_n, terms
+        
+        self.theta_hat = self._theta_hat_from_terms(x_n, terms)
+
+        #self.theta_hat = self.compute_theta_hat_true(x_obs)
+
+    
     @torch.no_grad()
     def estimate_coverage(self,
                           beta: float,
@@ -451,7 +456,7 @@ class ConjugatePosterior():
 
         Draws ``B`` resamples of the rows of `x_obs` with replacement,
         evaluates the closed-form posterior
-        :meth:`calibrated_posterior` at ``beta`` for each, and returns the
+        :meth:`compute_posterior` at ``beta`` for each, and returns the
         fraction of resamples whose ``1 - alpha`` chi-squared ellipsoid
         contains the cached ``theta_hat``.
 
@@ -486,26 +491,38 @@ class ConjugatePosterior():
         RuntimeError
             If called before :meth:`prepare_calibration`.
         """
-        if self.theta_hat is None:
+        if self.theta_hat is None or self._calib_terms is None:
             raise RuntimeError(
                 "ConjugatePosterior.estimate_coverage requires "
                 "prepare_calibration to be called first"
             )
 
-        d_theta = self.prior_mean.shape[0]
-        n_obs = x_obs.shape[0]
-        device = x_obs.device
-        chi2_critical_value = chi2.ppf(1.0 - alpha, df=d_theta)
+        if x_obs is not self._calib_x_obs and not (
+                x_obs.shape == self._calib_x_obs.shape
+                and torch.equal(x_obs, self._calib_x_obs)
+            ):
+                raise ValueError(
+                    "x_obs differs from the data passed to prepare_calibration; "
+                    "call prepare_calibration again for new data"
+                )
+
+        chi2_critical_value = chi2.ppf(1.0 - alpha, df=self.prior_mean.shape[0])
 
         covered = 0
         for _ in range(B):
-            indices = torch.randint(0, n_obs, (n_obs,), device=device)
+            indices = torch.randint(0, x_obs.shape[0], (x_obs.shape[0],), device=x_obs.device)
             x_boot = x_obs[indices]
-            mu_boot, Sigma_boot = self.calibrated_posterior(x_boot, beta)
+            terms_boot = tuple(t[indices] for t in self._calib_terms)
+            #mu_boot, Sigma_boot = self.compute_posterior(x_boot, beta)
+            #replace with computation from cached terms
+            mu_boot, Sigma_boot = self._posterior_from_terms(self._calib_x_n[indices], terms_boot, beta)
+            
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() \
                     <= chi2_critical_value:
                 covered += 1
+        
         cov = covered / B
+        
         # Closed-form posterior: no MCMC pool, so ESS is infinite and
         # pool size is zero.  The caller's refresh check
         # ``ess_mean < ess_threshold * pool_size`` is then

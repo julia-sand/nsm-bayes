@@ -120,7 +120,6 @@ def step_bisect(
 
 
 def best_beta_from_grid(
-    grid,
     history,
     target_coverage: float,
     beta_min: float,
@@ -144,8 +143,8 @@ def best_beta_from_grid(
         sizes.
     """
     
-    #compute coverage and ess at each gridpoint
-    covs = history["covariances"]
+    covs = history["coverages"]
+    grid = history["betas"]
     
     gaps = [abs(c - target_coverage) for c in covs]
     best = min(range(len(grid)), key=lambda i: (gaps[i], -covs[i], -grid[i]))
@@ -168,15 +167,12 @@ def grid_start(
     *,
     target_coverage: float,
     beta_min: float,
-    refine_steps: int = 3,
 ) -> tuple[float, float | None, tuple[float, float] | None, dict[str, list[float]]]:
     """Grid-search start for ``beta``.
 
     Evaluates the coverage at each ``beta`` in ``grid`` (already sorted and
-    validated by the caller), bisects the first bracket where it drops below
-    the target ``refine_steps`` times in ``log(beta)``, and interpolates the
-    crossing; the slope of the final bracket is returned as history
-    information.  With no crossing it returns the largest grid value
+    validated by the caller), the slope of the final bracket is returned as history
+    information.  It returns the largest grid value
     (all above target), the smallest (all below) or the closest, and slope
     and bracket ``None``.
 
@@ -196,17 +192,12 @@ def grid_start(
         a crossing.
     grid_history : dict
         ``{"betas": [...], "coverages": [...], "ess": [...]}`` for every
-        evaluated point (grid plus refinement mids), in increasing order.
+        evaluated point in increasing order.
     """
     if not grid or grid[0] <= 0:
         raise ValueError("initial_beta grid must contain positive values")
 
     covs, esss = coverage_on_grid(grid,coverage_fn)
-    
-    #for b in grid:
-    #    cov, ess, _ = coverage_fn(b)
-    #    covs.append(float(cov))
-    #    esss.append(float(ess))
     
     seen = dict(zip(grid, covs))  # every evaluated beta -> coverage
     seen_ess = dict(zip(grid, esss))  # every evaluated beta -> ess
@@ -220,22 +211,13 @@ def grid_start(
     slope = bracket = None
     if i is not None:
         lo, c_lo, hi, c_hi = grid[i], covs[i], grid[i + 1], covs[i + 1]
-        for _ in range(refine_steps):
-            mid = math.sqrt(lo * hi)
-            c_mid, ess_mid, _ = coverage_fn(mid)
-            c_mid = float(c_mid)
-            seen[mid] = c_mid
-            seen_ess[mid] = float(ess_mid)
-            if c_mid >= target_coverage:
-                lo, c_lo = mid, c_mid
-            else:
-                hi, c_hi = mid, c_mid
         frac = (c_lo - target_coverage) / (c_lo - c_hi)
         start = math.exp(math.log(lo) + frac * (math.log(hi) - math.log(lo)))
         slope = (c_hi - c_lo) / (math.log(hi) - math.log(lo))
         bracket = (math.log(lo), math.log(hi))
     elif all(c >= target_coverage for c in covs):
         start = grid[-1]
+        
     elif all(c < target_coverage for c in covs):
         start = grid[0]
     else:

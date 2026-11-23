@@ -228,7 +228,6 @@ def calibrate_beta(
     max_log_step: float = 0.25,
     beta_min: float = 0.01,
     ess_threshold: float = 0.3,
-    refine_steps: int = 3,
     **kwargs: Any,
 ) -> tuple[float, dict]:
     """Calibrate ``beta`` so the bootstrap coverage matches ``1 - alpha``.
@@ -281,9 +280,6 @@ def calibrate_beta(
         Lower bound on ``beta``; ``log beta`` is clamped at ``log(beta_min)``.
     ess_threshold : float, default 0.3
         ESS-gated pool refresh trigger (general method only).
-    refine_steps : int, default 3
-        Number of log-bisection refinement steps after the grid finds a
-        crossing (array `initial_beta` only).
 
     Returns
     -------
@@ -343,15 +339,15 @@ def calibrate_beta(
             ),
             target_coverage=target,
             beta_min=beta_min,
-            refine_steps=refine_steps,
         )
         if method=="grid":
             history["betas"] = grid_history["betas"]
             history["coverages"] = grid_history["coverages"]              
             history["ess"] = grid_history["ess"]
 
-            beta = best_beta_from_grid(grid,history)
+            beta = best_beta_from_grid(history,target,beta_min)
             return beta, history
+        
     else:
         start, slope, bracket, grid_history = scalar_start, None, None, None
 
