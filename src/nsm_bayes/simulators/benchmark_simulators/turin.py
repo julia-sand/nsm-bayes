@@ -99,7 +99,7 @@ class TurinSimulator:
         # One batch draw: `n` receivers, each with its own theta, in a
         # single call to :meth:`simulate`.
         theta = self.prior.sample((n_samples,))
-        H = self.simulate_channel(theta)
+        H = self.simulate_channel(theta,n_samples)
         noise = self.sample_noise(torch.exp(theta[:, 3]), n_samples)
         x_sim = self.summary(H + noise)
         return theta, x_sim

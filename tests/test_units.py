@@ -59,7 +59,7 @@ def conjugate_posteriors():
                                    robust=False, weight_type="imq")
     x_obs = torch.randn(30, d_x) * 2.0 + 1.0
     with torch.no_grad():
-        results = {b: posterior.calibrated_posterior(x_obs, b) for b in BETAS}
+        results = {b: posterior.compute_posterior(x_obs, b) for b in BETAS}
     return prior, results
 
 
@@ -353,7 +353,7 @@ class _FixedConjugatePosterior:
         for _ in range(B):
             indices = torch.randint(0, n_obs, (n_obs,), device=x_obs.device)
             x_boot = x_obs[indices]
-            mu_boot, Sigma_boot = self.calibrated_posterior(x_boot, beta)
+            mu_boot, Sigma_boot = self.compute_posterior(x_boot, beta)
             from nsm_bayes.utils.statistics import mahalanobis_sq
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() <= crit:
                 covered += 1
@@ -361,7 +361,7 @@ class _FixedConjugatePosterior:
         # pool size is zero (same convention as the real method).
         return covered / B, float("inf"), 0
 
-    def calibrated_posterior(self, x_boot, beta):
+    def compute_posterior(self, x_boot, beta):
         return torch.zeros(len(self.prior_mean)), torch.eye(len(self.prior_mean))
 
 
@@ -827,7 +827,7 @@ def test_grid_start_refines_crossing_and_extracts_slope_and_bracket():
     # (1.35 - 0.5*log10(b) = 0.95 -> log10(b) = 0.8 -> b ~= 6.31, inside [1, 10])
     cov = lambda b: (1.35 - 0.5 * math.log10(b), 4.0, 10)
     start, slope, bracket, hist = grid_start(
-        [0.1, 1.0, 10.0], cov, target_coverage=TARGET, beta_min=0.01, refine_steps=3)
+        [0.1, 1.0, 10.0], cov, target_coverage=TARGET, beta_min=0.01)
     # crossing is bracketed between 1.0 and 10.0; refinement stays inside
     assert math.log(1.0) < math.log(start) < math.log(10.0)
     assert slope < 0  # coverage falls with beta

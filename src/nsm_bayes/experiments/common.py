@@ -341,7 +341,7 @@ def run_conjugate_method(
         )
 
         #compute robust posterior
-        mu_n, Sigma_n = posterior.calibrated_posterior(
+        mu_n, Sigma_n = posterior.compute_posterior(
             x_obs_mis,
             beta)
 
