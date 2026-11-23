@@ -295,7 +295,7 @@ class EnergyBasedModel(nn.Module):
         if save_file is not None:
             self.save_checkpoint(save_file)
 
-        return self
+        #return self
     
         
     def save_checkpoint(self, save_file):
