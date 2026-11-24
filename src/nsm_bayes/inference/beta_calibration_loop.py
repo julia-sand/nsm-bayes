@@ -106,7 +106,6 @@ def _validate_method(
 
 def _iterative_loop(
     posterior: Any,
-    x_obs: torch.Tensor | None,
     log_beta: float,
     bracket: tuple[float, float] | None = None,
     *,
@@ -114,7 +113,6 @@ def _iterative_loop(
     target: float,
     B: int,
     n_iterations: int,
-    alpha: float,
     max_log_step: float,
     beta_min: float,
     ess_threshold: float,
@@ -122,18 +120,21 @@ def _iterative_loop(
     """Run the shared iteration loop under the selected update rule.
 
     Each iteration estimates the coverage at the current ``beta`` through
-    ``posterior.estimate_coverage`` and hands the coverage to the rule,
-    which returns the updated ``log(beta)``.  When the returned ESS drops
-    below ``ess_threshold * pool_size``, the pool is refreshed via
-    ``posterior.refresh_pool`` at a small local step around the current
-    coverage (see :meth:`GeneralPosterior.refresh_pool`).  The refresh is
+    ``posterior.estimate_coverage`` (which reads ``alpha`` and ``B`` from
+    the posterior's own state, set by ``prepare_calibration``) and hands
+    the coverage to the rule, which returns the updated ``log(beta)``.
+    When the returned ESS drops below ``ess_threshold * pool_size``, the
+    pool is refreshed via ``posterior.refresh_pool`` at a small local step
+    around the current coverage (see
+    :meth:`GeneralPosterior.refresh_pool`).  The refresh is
     skipped after the final iteration, where the redrawn pool would never be
     used by another coverage estimate.
 
     Parameters
     ----------
-    posterior, x_obs, B, alpha, ess_threshold
-        Forwarded to ``posterior.estimate_coverage``.
+    posterior, B, ess_threshold
+        Forwarded to ``posterior.estimate_coverage``; ``B`` is also used
+        for the fixed refresh rate ``k_t = 10 / (10 + B)``.
     log_beta : float
         Starting ``log(beta)``.
     bracket : tuple of float or None
@@ -173,7 +174,7 @@ def _iterative_loop(
 
         #estimate coverage
         c_hat, ess, pool_size = posterior.estimate_coverage(
-            beta, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
+            beta, ess_threshold=ess_threshold
         )
         
         c_hat = float(c_hat)
@@ -203,8 +204,7 @@ def _iterative_loop(
         # ESS-gated pool refresh (normflow only; conjugate ESS is always inf, so will be skipped).
         # Uses fixed rate k_t = 10/(10+B), so the refresh beta is a small local step around the
         # current coverage, independent of t.
-        # Skipped after the final iteration: the refreshed pool would only be
-        # used by a coverage estimate that is never drawn.
+        # Skipped after the final iteration, since the refreshed pool would not be used.
         
         if (t < n_iterations - 1
                 and pool_size > 0 and ess < ess_threshold * pool_size):
@@ -309,7 +309,6 @@ def calibrate_beta(
 
     target = 1 - alpha
 
-
     if kwargs:
         raise TypeError(
             f"calibrate_beta() got an unexpected keyword argument {next(iter(kwargs))!r}"
@@ -335,7 +334,7 @@ def calibrate_beta(
         start, slope, bracket, grid_history = grid_start(
             grid,
             lambda beta: posterior.estimate_coverage(
-                beta, alpha=alpha, B=B, x_obs=x_obs, ess_threshold=ess_threshold
+                beta, ess_threshold=ess_threshold
             ),
             target_coverage=target,
             beta_min=beta_min,
@@ -362,9 +361,9 @@ def calibrate_beta(
         history["initial_beta"] = start
 
     beta, betas, coverages, ess_list, final_bracket = _iterative_loop(
-        posterior, x_obs, math.log(start), bracket,
+        posterior, math.log(start), bracket,
         method=method, target=target, B=B, n_iterations=n_iterations,
-        alpha=alpha, max_log_step=max_log_step, beta_min=beta_min,
+        max_log_step=max_log_step, beta_min=beta_min,
         ess_threshold=ess_threshold,
     )
     history["betas"] = betas

@@ -387,16 +387,15 @@ class GeneralPosterior:
     @torch.no_grad()
     def estimate_coverage(self,
                           beta: float,
-                          alpha: float,
-                          B: int,
-                          x_obs: Tensor = None,
                           ess_threshold: float = 0.3) -> tuple[float, float, int]:
         """Empirical bootstrap coverage at ``beta``.
 
-        Draws ``B`` multinomial bootstrap count vectors, importance-reweights
-        the cached base pool from :attr:`beta_base` to ``beta`` on each
-        resample, and returns the fraction of resamples whose weighted
-        ``1 - alpha`` ellipsoid contains ``theta_hat``.
+        Uses the ``alpha`` and ``B`` stored by :meth:`prepare_calibration`
+        (``self.alpha``, ``self.B``).  Draws ``B`` multinomial bootstrap
+        count vectors, importance-reweights the cached base pool from
+        :attr:`beta_base` to ``beta`` on each resample, and returns the
+        fraction of resamples whose weighted ``1 - alpha`` ellipsoid
+        contains ``theta_hat``.
 
         The mean effective sample size (ESS) of the importance weight matrix
         is also returned so the caller (the calibration loop) can decide
@@ -408,13 +407,6 @@ class GeneralPosterior:
         ----------
         beta : float
             Current value of ``beta`` to evaluate the coverage at.
-        alpha : float
-            Miscoverage level; the weighted ellipsoid has nominal level
-            ``1 - alpha``.
-        B : int
-            Number of bootstrap resamples.
-        x_obs : torch.Tensor, optional
-            Observed data (unused by the general method).
         ess_threshold : float, default 0.3
             Unused by this method (the caller uses the returned ESS to make
             the refresh decision); kept for interface consistency.
@@ -434,7 +426,7 @@ class GeneralPosterior:
         RuntimeError
             If called before :meth:`prepare_calibration`.
         """
-        if self.theta_samples is None or self.theta_hat is None:
+        if self.theta_samples is None or self.theta_hat is None or self.alpha is None or self.B is None:
             raise RuntimeError(
                 "GeneralPosterior.estimate_coverage requires "
                 "prepare_calibration to be called first"
@@ -445,10 +437,10 @@ class GeneralPosterior:
         M, d = self.theta_samples.shape
         n = self.x_obs.shape[0]
 
-        # --- importance weights for each bootstrap at beta (B, M) ---
+        # --- importance weights for each bootstrap at beta (self.B, M) ---
         W = reweight_for_bootstrap_beta(
             self.ell, self.L_orig,
-            multinomial_bootstrap_counts(n, B, device=device, dtype=dtype),
+            multinomial_bootstrap_counts(n, self.B, device=device, dtype=dtype),
             beta_new=beta, beta_base=self.beta_base,
         )
 
@@ -458,11 +450,11 @@ class GeneralPosterior:
                 self.theta_samples,  # (M, d)
                 W[b],                # (M,)
                 self.theta_hat,      # (d,)
-                alpha,               # so the region has nominal level 1 - alpha
+                self.alpha,          # so the region has nominal level 1 - alpha
             )
-            for b in range(B)
+            for b in range(self.B)
         )
-        cov = cover / B
+        cov = cover / self.B
 
         # --- ESS diagnostic (caller uses this to decide whether to refresh) ---
         ess_mean = (1.0 / (W**2).sum(dim=1)).mean().item()

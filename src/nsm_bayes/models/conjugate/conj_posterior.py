@@ -455,29 +455,20 @@ class ConjugatePosterior():
     @torch.no_grad()
     def estimate_coverage(self,
                           beta: float,
-                          alpha: float,
-                          B: int,
-                          x_obs: torch.Tensor,
                           ess_threshold: float = 0.3) -> tuple[float, float, int]:
         """Empirical bootstrap coverage at ``beta``.
 
-        Draws ``B`` resamples of the rows of `x_obs` with replacement,
-        evaluates the closed-form posterior
-        :meth:`compute_posterior` at ``beta`` for each, and returns the
-        fraction of resamples whose ``1 - alpha`` chi-squared ellipsoid
-        contains the cached ``theta_hat``.
+        Uses the state stored by :meth:`prepare_calibration` (``self.alpha``,
+        ``self.B``, and the cached observed data / network terms).  Draws
+        ``B`` resamples of the rows of the cached observed data with
+        replacement, evaluates the closed-form posterior at ``beta`` for
+        each, and returns the fraction of resamples whose ``1 - alpha``
+        chi-squared ellipsoid contains the cached ``theta_hat``.
 
         Parameters
         ----------
         beta : float
             Current value of ``beta`` to evaluate the coverage at.
-        alpha : float
-            Miscoverage level; the credible ellipsoid has nominal level
-            ``1 - alpha``.
-        B : int
-            Number of bootstrap resamples.
-        x_obs : torch.Tensor
-            Observed data of shape ``(n, d_x)`` in original units.
         ess_threshold : float, default 0.3
             ESS refresh trigger of the general method (unused here).
 
@@ -498,37 +489,28 @@ class ConjugatePosterior():
         RuntimeError
             If called before :meth:`prepare_calibration`.
         """
-        if self.theta_hat is None or self._calib_terms is None:
+        if self.theta_hat is None or self._calib_x_obs is None \
+                or self._calib_terms is None or self.alpha is None or self.B is None:
             raise RuntimeError(
                 "ConjugatePosterior.estimate_coverage requires "
                 "prepare_calibration to be called first"
             )
 
-        if x_obs is not self._calib_x_obs and not (
-                x_obs.shape == self._calib_x_obs.shape
-                and torch.equal(x_obs, self._calib_x_obs)
-            ):
-                raise ValueError(
-                    "x_obs differs from the data passed to prepare_calibration; "
-                    "call prepare_calibration again for new data"
-                )
-
-        chi2_critical_value = chi2.ppf(1.0 - alpha, df=self.prior_mean.shape[0])
+        chi2_critical_value = chi2.ppf(1.0 - self.alpha, df=self.prior_mean.shape[0])
 
         covered = 0
-        for _ in range(B):
-            indices = torch.randint(0, x_obs.shape[0], (x_obs.shape[0],), device=x_obs.device)
-            x_boot = x_obs[indices]
+        for _ in range(self.B):
+            indices = torch.randint(0, self._calib_x_obs.shape[0],
+                                    (self._calib_x_obs.shape[0],),
+                                    device=self._calib_x_obs.device)
             terms_boot = tuple(t[indices] for t in self._calib_terms)
-            #mu_boot, Sigma_boot = self.compute_posterior(x_boot, beta)
-            mu_boot, Sigma_boot = self._posterior_from_terms(self._calib_x_n[indices], terms_boot, beta)
-            
+            mu_boot, Sigma_boot = self._posterior_from_terms(
+                self._calib_x_n[indices], terms_boot, beta)
+
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() \
                     <= chi2_critical_value:
                 covered += 1
-        
-        cov = covered / B
-        
-        # Closed-form posterior
-        # return ESS infinite and pool size is zero for compatibility with other method.
+
+        cov = covered / self.B
+
         return cov, float("inf"), 0

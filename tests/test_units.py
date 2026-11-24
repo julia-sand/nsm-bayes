@@ -299,30 +299,31 @@ class _FlatGeneralPosterior:
 
     def prepare_calibration(self, beta, alpha, B, x_obs=None,
                             ess_threshold=0.3):
+        self.alpha = alpha
+        self.B = B
         self.theta_samples = self.sample(beta)
         self.beta_base = beta
         self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
         self.theta_hat = self.compute_theta_hat_true()
 
-    def estimate_coverage(self, beta, alpha, B, x_obs=None,
-                          ess_threshold=0.3):
+    def estimate_coverage(self, beta, ess_threshold=0.3):
         # Same importance-reweighted coverage step as the real method; the
         # indicator is read from the module so tests can monkeypatch it.
         n = self.x_obs.shape[0]
         W = reweight_for_bootstrap_beta(
             self.ell, self.L_orig,
-            multinomial_bootstrap_counts(n, B, device=self.x_obs.device,
+            multinomial_bootstrap_counts(n, self.B, device=self.x_obs.device,
                                          dtype=self.x_obs.dtype),
             beta_new=beta, beta_base=self.beta_base,
         )
         indicator = general_posterior.bootstrap_coverage_indicator
         cover = sum(
-            indicator(self.theta_samples, W[b], self.theta_hat, alpha)
-            for b in range(B)
+            indicator(self.theta_samples, W[b], self.theta_hat, self.alpha)
+            for b in range(self.B)
         )
         ess_mean = (1.0 / (W ** 2).sum(dim=1)).mean().item()
         assert ess_mean >= ess_threshold * self.theta_samples.shape[0]
-        return cover / B, ess_mean, self.theta_samples.shape[0]
+        return cover / self.B, ess_mean, self.theta_samples.shape[0]
 
     def refresh_pool(self, beta):
         # With flat losses ESS never drops, so this is never called in the
@@ -338,28 +339,32 @@ class _FixedConjugatePosterior:
     def __init__(self, theta_hat, d=2):
         self.prior_mean = torch.zeros(d)
         self._theta_hat = theta_hat
+        self.x_obs = torch.zeros(10, 1)
 
     def prepare_calibration(self, beta, alpha, B, x_obs=None,
                             ess_threshold=0.3):
+        self.alpha = alpha
+        self.B = B
         self.theta_hat = self._theta_hat
+        if x_obs is not None:
+            self.x_obs = x_obs
 
-    def estimate_coverage(self, beta, alpha, B, x_obs=None,
-                          ess_threshold=0.3):
+    def estimate_coverage(self, beta, ess_threshold=0.3):
         from scipy.stats import chi2
         d = len(self.prior_mean)
-        n_obs = x_obs.shape[0]
-        crit = chi2.ppf(1.0 - alpha, df=d)
+        n_obs = self.x_obs.shape[0]
+        crit = chi2.ppf(1.0 - self.alpha, df=d)
         covered = 0
-        for _ in range(B):
-            indices = torch.randint(0, n_obs, (n_obs,), device=x_obs.device)
-            x_boot = x_obs[indices]
+        for _ in range(self.B):
+            indices = torch.randint(0, n_obs, (n_obs,), device=self.x_obs.device)
+            x_boot = self.x_obs[indices]
             mu_boot, Sigma_boot = self.compute_posterior(x_boot, beta)
             from nsm_bayes.utils.statistics import mahalanobis_sq
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() <= crit:
                 covered += 1
         # Closed-form posterior: no MCMC pool, so ESS is infinite and the
         # pool size is zero (same convention as the real method).
-        return covered / B, float("inf"), 0
+        return covered / self.B, float("inf"), 0
 
     def compute_posterior(self, x_boot, beta):
         return torch.zeros(len(self.prior_mean)), torch.eye(len(self.prior_mean))
@@ -489,12 +494,11 @@ def test_pool_not_refreshed_on_final_iteration():
             super().__init__(n=n, d=d)
             self.refresh_calls = refresh_calls
 
-        def estimate_coverage(self, beta, alpha, B, x_obs=None,
-                              ess_threshold=0.3):
+        def estimate_coverage(self, beta, ess_threshold=0.3):
             # Always report ESS below threshold so the refresh branch is
             # taken on every iteration that gets past the guard.
             cov, _, pool = super().estimate_coverage(
-                beta, alpha, B, x_obs=x_obs, ess_threshold=ess_threshold)
+                beta, ess_threshold=ess_threshold)
             return cov, 0.05 * pool, pool
 
         def refresh_pool(self, beta):
@@ -535,8 +539,7 @@ def test_calibration_triggers_refresh_on_low_ess():
             super().__init__(n=n, d=d)
             self.refresh_calls = []
 
-        def estimate_coverage(self, beta, alpha, B, x_obs=None,
-                              ess_threshold=0.3):
+        def estimate_coverage(self, beta, ess_threshold=0.3):
             # Force low ESS on the second call to trigger a refresh.
             if not hasattr(self, '_call_count'):
                 self._call_count = 0
@@ -544,12 +547,12 @@ def test_calibration_triggers_refresh_on_low_ess():
             if self._call_count == 1:
                 # First call: normal high ESS
                 cov, ess, pool = super().estimate_coverage(
-                    beta, alpha, B, x_obs=x_obs, ess_threshold=ess_threshold)
+                    beta, ess_threshold=ess_threshold)
                 return cov, ess, pool
             else:
                 # Subsequent calls: force low ESS
                 cov, _, pool = super().estimate_coverage(
-                    beta, alpha, B, x_obs=x_obs, ess_threshold=ess_threshold)
+                    beta, ess_threshold=ess_threshold)
                 return cov, 0.05 * pool, pool
 
         def refresh_pool(self, beta):
@@ -738,7 +741,7 @@ def test_gpc_loop_run_structure():
         return max(0.0, min(1.0, 1.05 - math.log10(b)))
 
     class _GPCPosterior(_NoGridPosterior):
-        def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
+        def estimate_coverage(self, beta, ess_threshold=0.3):
             return cov(beta), 10.0, 10
 
     n_iterations = 20
@@ -859,7 +862,7 @@ class _NoGridPosterior:
     def prepare_calibration(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
         pass
 
-    def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
+    def estimate_coverage(self, beta, ess_threshold=0.3):
         return 0.5, 10.0, 10
 
 
@@ -926,7 +929,7 @@ def test_array_initial_beta_adds_history_extras():
     cov = lambda b: 1.35 - 0.5 * math.log10(b)
 
     class _CrossingPosterior(_GridPosterior):
-        def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
+        def estimate_coverage(self, beta, ess_threshold=0.3):
             return cov(beta), 5.0, 10
 
     beta, hist = calibrate_beta(_CrossingPosterior(), initial_beta=np.array([0.1, 1.0, 10.0]),
@@ -946,7 +949,7 @@ def test_grid_method_returns_grid_point():
     cov = lambda b: max(0.0, min(1.0, 1.95 - math.log10(b)))
 
     class _GridOnlyPosterior(_GridPosterior):
-        def estimate_coverage(self, beta, alpha, B, x_obs=None, ess_threshold=0.3):
+        def estimate_coverage(self, beta, ess_threshold=0.3):
             return cov(beta), 7.0, 10
 
     beta, hist = calibrate_beta(_GridOnlyPosterior(),
