@@ -78,6 +78,12 @@ class ConjugatePosterior():
         Prior covariance in standardised ``theta`` space.
     prior_cov_inv : torch.Tensor
         Inverse of `prior_cov_norm`.
+    alpha : float, optional
+        Miscoverage level of the calibration; set by
+        :meth:`prepare_calibration`, ``None`` until then.
+    B : int, optional
+        Number of bootstrap resamples per iteration; set by
+        :meth:`prepare_calibration`, ``None`` until then.
 
     See Also
     --------
@@ -127,6 +133,8 @@ class ConjugatePosterior():
         # Point estimate used by the beta-calibration steps
         # (see prepare_calibration). None until prepare_calibration is called.
         self.theta_hat: Tensor | None = None
+        self.alpha: float | None = None           # miscoverage level of the calibration
+        self.B: int | None = None                 # bootstrap resamples per iteration
 
     def _normalise_input(self,x_obs: torch.Tensor) -> torch.Tensor:
         """Standardise data with the model's ``x`` standardiser.
@@ -430,6 +438,8 @@ class ConjugatePosterior():
 
         """
         # prepare_calibration
+        self.alpha = float(alpha)
+        self.B = int(B)
         x_n = self._normalise_input(x_obs)
 
         #build jacobian and hessian cache for reuse in the whole 
@@ -511,7 +521,6 @@ class ConjugatePosterior():
             x_boot = x_obs[indices]
             terms_boot = tuple(t[indices] for t in self._calib_terms)
             #mu_boot, Sigma_boot = self.compute_posterior(x_boot, beta)
-            #replace with computation from cached terms
             mu_boot, Sigma_boot = self._posterior_from_terms(self._calib_x_n[indices], terms_boot, beta)
             
             if mahalanobis_sq(self.theta_hat, mu_boot, Sigma_boot).item() \
@@ -520,8 +529,6 @@ class ConjugatePosterior():
         
         cov = covered / B
         
-        # Closed-form posterior: no MCMC pool, so ESS is infinite and
-        # pool size is zero.  The caller's refresh check
-        # ``ess_mean < ess_threshold * pool_size`` is then
-        # ``inf < 0`` which is always False, so no refresh is triggered.
+        # Closed-form posterior
+        # return ESS infinite and pool size is zero for compatibility with other method.
         return cov, float("inf"), 0

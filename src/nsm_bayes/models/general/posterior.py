@@ -75,6 +75,12 @@ class GeneralPosterior:
     w2, grad_w2 : torch.Tensor
         Squared weights ``(n,)`` and their gradients ``(n, d_x)``, computed
         once from `x_obs`.
+    alpha : float, optional
+        Miscoverage level of the calibration; set by
+        :meth:`prepare_calibration`, ``None`` until then.
+    B : int, optional
+        Number of bootstrap resamples per iteration; set by
+        :meth:`prepare_calibration`, ``None`` until then.
 
     Notes
     -----
@@ -115,6 +121,8 @@ class GeneralPosterior:
         self.beta_base: float | None = None       # beta the pool was drawn at
         self.ell: Tensor | None = None            # (M, n) per-observation losses
         self.L_orig: Tensor | None = None         # (M,) mean loss per sample
+        self.alpha: float | None = None           # miscoverage level of the calibration
+        self.B: int | None = None                 # bootstrap resamples per iteration
 
     def _per_x_sm_loss(self, xi, w2_i, grad_w2_i, theta):
         """Weighted SM loss for one observation `xi` at one `theta`.
@@ -331,6 +339,8 @@ class GeneralPosterior:
         :meth:`compute_theta_hat_true` (200 Adam steps with learning rate
         ``1e-2``, started from the mean of the base pool).
         """
+        self.alpha = float(alpha)
+        self.B = int(B)
         self.theta_samples = self.sample(beta)
         self.beta_base = beta
         self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
