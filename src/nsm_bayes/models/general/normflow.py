@@ -58,6 +58,7 @@ class GeneralModel():
         self.trainer = SNLE(self.prior,density_estimator=density_estimator)
         self.mcmc = mcmc_settings
         self.estimator = None
+        self.train_history = None
 
     def fit(self, theta_sim, x_sim):
         """Train the likelihood estimator on simulated pairs.
@@ -84,7 +85,11 @@ class GeneralModel():
         #fit the model, return trained model 
         #  
         self.estimator = self.trainer.append_simulations(theta_sim.float(), x_sim.float()).train()
+        
+        self.train_history = self.trainer.summary
+        
         self._freeze()
+
         return self
 
     def _freeze(self) -> None:
@@ -97,7 +102,7 @@ class GeneralModel():
         """
         for p in self.estimator.parameters():
             p.requires_grad_(False)
-
+        self.estimator.eval() #evaluation mode
 
     def load_checkpoint(self, path):
         """Load a likelihood estimator saved with ``torch.save``.
@@ -119,11 +124,13 @@ class GeneralModel():
         The estimator is mapped onto the CPU, where it is trained, and
         frozen (parameters do not require gradients), as in :meth:`fit`.
         """
-        self.estimator = torch.load(path, map_location="cpu", weights_only=False)
-        self._freeze()  # also covers older checkpoints saved before freezing
+        self.estimator = torch.load(path,
+                                    map_location="cpu",
+                                    weights_only=False,)
+        self._freeze()
         return self
-
-    def log_prob(self, x_obs, theta_vec=None):
+    
+    def log_prob(self, x_obs, theta_vec):
         """Evaluate ``log q(x_obs | theta_vec)`` under the trained flow.
 
         Parameters
@@ -141,9 +148,24 @@ class GeneralModel():
             ``log_prob``, clamped from below at ``-1e10`` so ``-inf`` does
             not propagate.
         """
-        lp = self.estimator.log_prob(x_obs,condition=theta_vec)
         
+        single_observation = x_obs.ndim == 1
+        single_condition = theta_vec.ndim == 1
+
+        x = x_obs.unsqueeze(0) if single_observation else x_obs
+        theta = theta_vec.unsqueeze(0) if single_condition else theta_vec
+
+        lp = self.estimator.log_prob(x, condition=theta)
+
+        if single_condition:
+            # One log-density per observation.
+            lp = lp.reshape(x.shape[:-1])
+
+        if single_observation and single_condition:
+            lp = lp.reshape(())
+
         return torch.clamp(lp, min=-1e10)
+
     
     def sample_nle_posterior(self, x_obs, mcmc_method="slice_np"):
         """Sample the standard (non-robust) NLE posterior with MCMC.

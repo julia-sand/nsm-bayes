@@ -174,10 +174,10 @@ class GeneralPosterior:
             Scalar loss; differentiable with respect to `theta`.
         """
         return self._losses_one_theta(theta).mean()
-
+    
     @torch.no_grad()
     def per_x_losses(self, theta_samples):
-        """Per-observation losses for a batch of parameter samples.
+        """Compute per-observation losses for parameter samples.
 
         Parameters
         ----------
@@ -187,18 +187,21 @@ class GeneralPosterior:
         Returns
         -------
         ell : torch.Tensor
-            Losses ``ell[m, i] = l(theta_m; x_i)``, shape ``(M, n)``.
+            Per-observation losses of shape ``(M, n)``.
         L_orig : torch.Tensor
-            Mean loss for each sample, ``ell.mean(dim=1)``, shape ``(M,)``.
+            Mean loss for each parameter sample, shape ``(M,)``.
 
         Notes
         -----
-        Evaluated without gradients, vectorised over samples and
-        observations with nested ``vmap``. The outputs form the cache used
-        by :func:`~nsm_bayes.inference.bootstrap.reweight_for_bootstrap_beta`.
+        Loops over parameter samples and vectorises over observations.
         """
-        ell = vmap(lambda th: self._losses_one_theta(th))(theta_samples)
+        
+        ell = torch.stack(
+            [self._losses_one_theta(th) for th in theta_samples],
+            dim=0,
+        )
         return ell, ell.mean(dim=1)
+
 
     def posterior_log_prob(self, theta_np: np.ndarray, beta: float) -> float:
         """Unnormalised log-density of the generalised posterior.
