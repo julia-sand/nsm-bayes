@@ -116,6 +116,7 @@ class _StubNLE:
         self._density_estimator = density_estimator
         self._mu = None
         self._param = torch.nn.Parameter(torch.tensor(0.0))
+        self.summary = None
 
     # -- sbi API surface --------------------------------------------------- #
     def append_simulations(self, theta_sim, x_sim):
@@ -123,6 +124,10 @@ class _StubNLE:
         return self
 
     def train(self, **kwargs):
+        self.summary = {}
+        return self
+
+    def eval(self):
         return self
 
     def parameters(self):

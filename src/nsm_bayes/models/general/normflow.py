@@ -15,7 +15,6 @@ wraps them.
 import torch
 
 from sbi.inference import SNLE
-from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 
 class GeneralModel():
     """Neural likelihood estimator from sbi, with save/load and sampling.

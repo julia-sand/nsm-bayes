@@ -6,10 +6,9 @@ produces structurally valid, non-negative summary statistics and a valid
 Case-1 posterior.
 """
 import pytest
-import torch
 
 from nsm_bayes.experiments import common, sir
-from tests.conftest import assert_posterior_artifacts, load_tensor
+from tests.conftest import assert_posterior_artifacts
 
 
 @pytest.fixture

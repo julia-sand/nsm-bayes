@@ -680,13 +680,21 @@ def test_load_checkpoint_on_dims_built_model(d_x, d_theta, tmp_path):
 import math
 
 from nsm_bayes.inference.beta_update_rules import (
+    best_beta_from_grid,
     grid_start,
-    run_grid_search,
     step_bisect,
     step_gpc,
 )
 
 TARGET = 0.95
+
+
+def _grid_search(grid, coverage_fn, target_coverage=TARGET, beta_min=0.01):
+    """Fixed-grid selection: ``grid_start`` evaluates the grid, then
+    :func:`best_beta_from_grid` picks the closest point to the target."""
+    _, _, _, hist = grid_start(grid, coverage_fn,
+                               target_coverage=target_coverage, beta_min=beta_min)
+    return best_beta_from_grid(hist, target_coverage, beta_min), hist
 
 
 def test_step_gpc_move_magnitude_and_floor():
@@ -784,8 +792,7 @@ def test_grid_search_selection_is_closest_to_target():
     grid = [0.1, 1.0, 10.0]
 
     # a point exactly on the target must beat points off target
-    beta, hist = run_grid_search(grid, lambda b: (TARGET - 0.05 * abs(math.log10(b)), 1.0, 10),
-                                 target_coverage=TARGET, beta_min=0.01)
+    beta, hist = _grid_search(grid, lambda b: (TARGET - 0.05 * abs(math.log10(b)), 1.0, 10))
     assert beta == 1.0
     # history carries the whole grid in order with one coverage and ESS per point
     assert hist["betas"] == grid
@@ -793,33 +800,28 @@ def test_grid_search_selection_is_closest_to_target():
     assert len(hist["ess"]) == len(grid)
 
     # off-target: the closest point wins (0.1 is at gap 0.05, 10.0 at gap 0.9)
-    beta, _ = run_grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 0.1, 10.0: 0.05}[b], 2.0, 10),
-                              target_coverage=TARGET, beta_min=0.01)
+    beta, _ = _grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 0.1, 10.0: 0.05}[b], 2.0, 10))
     assert beta == 0.1
 
-    # tie in |gap|: documented tie-break prefers the larger beta
-    beta, _ = run_grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 1.0, 10.0: 0.9}[b], 2.0, 10),
-                              target_coverage=TARGET, beta_min=0.01)
+    # tie in |gap| (exact, via a dyadic offset): the higher coverage wins
+    d = 2.0 ** -14
+    beta, _ = _grid_search(grid, lambda b: ({0.1: TARGET - d, 1.0: TARGET + d, 10.0: TARGET - d}[b], 2.0, 10))
+    assert beta == 1.0
+    # tie in |gap| and coverage: the larger beta wins
+    beta, _ = _grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 0.9, 10.0: 0.9}[b], 2.0, 10))
     assert beta == 10.0
-    # tie in |gap| and side: the higher coverage wins (0.9 > 0.0, 0.1 > 1.0)
-    beta, _ = run_grid_search(grid, lambda b: ({0.1: 0.9, 1.0: 0.0, 10.0: 0.0}[b], 2.0, 10),
-                              target_coverage=TARGET, beta_min=0.01)
-    assert beta == 0.1
 
     # constant coverage: history still carries the grid in order
-    _, hist = run_grid_search(grid, lambda b: (0.5, 3.0, 10), target_coverage=TARGET,
-                              beta_min=0.01)
+    _, hist = _grid_search(grid, lambda b: (0.5, 3.0, 10))
     assert hist["betas"] == grid and len(hist["coverages"]) == len(grid)
     assert hist["ess"] == [3.0] * len(grid)
 
     # floor at beta_min
-    beta, _ = run_grid_search([0.001], lambda b: (TARGET, 1.0, 10), target_coverage=TARGET,
-                              beta_min=0.01)
+    beta, _ = _grid_search([0.001], lambda b: (TARGET, 1.0, 10))
     assert beta == 0.01
     # non-positive grid values are rejected
     with pytest.raises(ValueError, match="positive"):
-        run_grid_search([-1.0, 1.0], lambda b: (0.5, 1.0, 10), target_coverage=TARGET,
-                        beta_min=0.01)
+        _grid_search([-1.0, 1.0], lambda b: (0.5, 1.0, 10))
 
 
 def test_grid_start_refines_crossing_and_extracts_slope_and_bracket():
@@ -833,11 +835,10 @@ def test_grid_start_refines_crossing_and_extracts_slope_and_bracket():
     assert slope < 0  # coverage falls with beta
     assert bracket is not None and bracket[0] < bracket[1]
     assert math.log(1.0) <= bracket[0] < bracket[1] <= math.log(10.0)
-    # interpolated crossing is between the bracket endpoints
+    # interpolated crossing lies between the bracket endpoints
     assert bracket[0] <= math.log(start) <= bracket[1]
-    # all grid points plus the refinement mids are in the history, with
-    # one coverage and ESS per evaluated point
-    assert len(hist["betas"]) == 3 + 3
+    # history carries the grid points, one coverage and ESS per point
+    assert len(hist["betas"]) == 3
     assert len(hist["coverages"]) == len(hist["betas"])
     assert hist["ess"] == [4.0] * len(hist["betas"])
     # no crossing: all above target -> largest grid value
@@ -967,32 +968,33 @@ def test_optimize_beta_bo_rejects_bad_inputs():
     from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
 
     # Mismatched lengths
-    with pytest.raises(ValueError, match="same length"):
-        optimize_beta_bo([0.1, 0.2], [0.9], target_coverage=0.95)
+    with pytest.raises(ValueError, match="equal lengths"):
+        optimize_beta_bo([0.1, 0.2], [0.9], n_iter=0, evaluate_fn=lambda b: 0.0)
 
-    # Fewer than two grid points
-    with pytest.raises(ValueError, match="at least two"):
-        optimize_beta_bo([0.1], [0.9], target_coverage=0.95)
+    # Initial betas must lie within [beta_min, beta_max]
+    with pytest.raises(ValueError, match="search bounds"):
+        optimize_beta_bo([0.1, -0.2], [0.9, 0.8], n_iter=0, evaluate_fn=lambda b: 0.0)
 
-    # Non-positive beta
-    with pytest.raises(ValueError, match="positive"):
-        optimize_beta_bo([0.1, -0.2], [0.9, 0.8], target_coverage=0.95)
+    # Betas below beta_min are rejected too
+    with pytest.raises(ValueError, match="search bounds"):
+        optimize_beta_bo([0.001, 0.002, 0.005, 0.01], [0.9, 0.93, 0.97, 0.99],
+                         target_coverage=0.95, beta_min=0.01,
+                         n_iter=0, evaluate_fn=lambda b: 0.0)
 
 
 def test_optimize_beta_bo_recovers_crossing_beta():
-    """When coverage is monotonic and crosses the target, the BO estimate
-    should be close to the true crossing point."""
+    """With no extra evaluations (``n_iter=0``) the observed beta closest to
+    the target wins."""
     from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
 
     # coverage(b) = 0.8 + 0.5 * b  ->  crossing at b = 0.3
     betas = np.array([0.05, 0.1, 0.2, 0.3, 0.5, 1.0], dtype=float)
     coverages = np.array([0.8 + 0.5 * b for b in betas])
 
-    beta = optimize_beta_bo(betas, coverages, target_coverage=0.95)
-
+    beta, cov = optimize_beta_bo(betas, coverages, target_coverage=0.95,
+                                 n_iter=0, evaluate_fn=lambda b: 0.0)
     assert np.isfinite(beta) and beta > 0
-    # The GP should land within a reasonable range of the true crossing (0.3)
-    assert 0.05 < beta < 1.0
+    assert beta == pytest.approx(0.3)
 
 
 def test_optimize_beta_bo_fallback_when_no_crossing():
@@ -1003,23 +1005,10 @@ def test_optimize_beta_bo_fallback_when_no_crossing():
     betas = np.array([0.01, 0.02, 0.05, 0.1], dtype=float)
     coverages = np.array([0.50, 0.55, 0.70, 0.80])
 
-    beta = optimize_beta_bo(betas, coverages, target_coverage=0.99)
-    assert np.isfinite(beta) and beta > 0
-    # Should be near the grid point with the largest coverage (0.1)
-    assert beta == pytest.approx(0.1, rel=0.5)
-
-
-def test_optimize_beta_bo_respects_beta_min_floor():
-    """The returned beta is never below beta_min."""
-    from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
-
-    betas = np.array([0.001, 0.002, 0.005, 0.01], dtype=float)
-    # coverage increasing, crossing below 0.01
-    coverages = np.array([0.90, 0.93, 0.97, 0.99])
-
-    beta = optimize_beta_bo(betas, coverages, target_coverage=0.95,
-                            beta_min=0.01)
-    assert beta >= 0.01 - 1e-12
+    beta, _ = optimize_beta_bo(betas, coverages, target_coverage=0.99,
+                               n_iter=0, evaluate_fn=lambda b: 0.0)
+    # Should be the grid point with the largest coverage (0.1)
+    assert beta == pytest.approx(0.1)
 
 
 def test_optimize_beta_bo_result_deterministic():
@@ -1031,6 +1020,8 @@ def test_optimize_beta_bo_result_deterministic():
 
     results = set()
     for _ in range(3):
-        results.add(float(optimize_beta_bo(betas, coverages, target_coverage=0.95)))
+        beta, _ = optimize_beta_bo(betas, coverages, target_coverage=0.95,
+                                   n_iter=0, evaluate_fn=lambda b: 0.0)
+        results.add(float(beta))
     assert len(results) == 1  # fully deterministic
 

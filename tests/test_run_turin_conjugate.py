@@ -4,11 +4,9 @@ The full pipeline is exercised end to end with a tiny config (see
 :mod:`tests.conftest` for the fast stand-ins).
 """
 import pytest
-import torch
-from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import common, turin
-from tests.conftest import assert_posterior_artifacts, load_tensor
+from tests.conftest import assert_posterior_artifacts
 
 
 @pytest.fixture

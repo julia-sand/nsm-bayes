@@ -127,7 +127,7 @@ class TurinSimulator:
         """
         # One batch draw: `n` receivers, each with its own theta, in a
         # single call to :meth:`simulate`.
-        H_sim = self.simulate_channel(theta_true, N=n_obs)
+        H_sim = self.simulate_channel(theta_true, n_obs=n_obs)
         noise = self.sample_noise(torch.exp(theta_true[3]), n_obs)
         H, outlier_indices = self.zero_channels(epsilon, H_sim)
         x_obs_mis = self.summary(H + noise)
@@ -145,18 +145,23 @@ class TurinSimulator:
     
     def simulate_channel(self,theta,n_obs,):
         
-        G0, T, lambda_0, _ = torch.exp(theta)
+        theta = torch.as_tensor(theta, dtype=torch.float32)
+        if theta.dim() == 1:
+            theta = theta.unsqueeze(0)
+        if theta.shape[0] == 1:
+            theta = theta.expand(n_obs, -1)
+        G0, T, lambda_0, _ = torch.exp(theta).unbind(dim=-1)
 
         # channel matrix H
         H = torch.zeros((n_obs, self.Ns), dtype=torch.float32)
-        mu_poisson = lambda_0 * self.t_max
 
         for jR in range(n_obs):
+            mu_poisson = lambda_0[jR] * self.t_max
             n_points = int(torch.poisson(mu_poisson))
             delays = torch.sort(torch.rand(n_points) * self.t_max)[0]
 
             alpha = torch.zeros(n_points, dtype=torch.float32)
-            sigma2 = G0 * torch.exp(-delays / T) / lambda_0 * self.B
+            sigma2 = G0[jR] * torch.exp(-delays / T[jR]) / lambda_0[jR] * self.B
 
             std = torch.sqrt(sigma2 / 2)                                           # (n_points,)
             alpha = torch.complex(torch.normal(0.0, std), torch.normal(0.0, std))  # complex64, (n_points,)

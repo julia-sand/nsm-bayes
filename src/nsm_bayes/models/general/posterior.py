@@ -23,7 +23,6 @@ robust to contamination; :math:`\beta` is chosen by
 """
 import functools
 import logging
-import math
 
 import numpy as np
 import torch
@@ -195,7 +194,7 @@ class GeneralPosterior:
         -----
         Loops over parameter samples and vectorises over observations.
         """
-        
+
         ell = torch.stack(
             [self._losses_one_theta(th) for th in theta_samples],
             dim=0,

@@ -37,10 +37,7 @@ from torch.func import vmap
 
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.utils.linalg import (
-    get_cov_term_single,
-    get_non_div_term_single,
     sigma_inverse,
-    get_div_term_single,
     jacobian_and_laplacian,
     jacobian
 )

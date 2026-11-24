@@ -69,11 +69,12 @@ def generate_data(
     -------
     ExperimentData
         Training data ``(theta, x_sim)`` and the contaminated observations
-        ``x_obs_mis``; ``x_obs`` is ``None`` and there are no extras.
+        ``x_obs_mis``; ``x_obs`` is ``None`` and the extras hold the
+        noise-only ``outlier_indices``.
     """
     theta, x_sim = sim.generate_training_data(cfg.num_samples)
     
-    x_obs_mis = sim.generate_contaminated_data(
+    x_obs_mis, outlier_indices = sim.generate_contaminated_data(
         theta_true, n_obs=cfg.n_obs, epsilon=cfg.epsilon
     )
 
@@ -81,4 +82,5 @@ def generate_data(
         theta=theta,
         x_sim=x_sim,
         x_obs_mis=x_obs_mis,
+        extras={"outlier_indices": outlier_indices},
     )
