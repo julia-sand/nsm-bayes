@@ -1,4 +1,0 @@
-# This file is now managed by pyproject.toml. 
-# Use 'pip install .' to install dependencies.
--e .
-

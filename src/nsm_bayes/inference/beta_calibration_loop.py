@@ -286,15 +286,17 @@ def calibrate_beta(
     beta : float
         The calibrated value of ``beta``.
     history : dict
-        Always contains ``{"betas": list[float], "coverages": list[float],
-        "ess": list[float]}`` (for ``grid``: the grid in increasing order
-        and its coverages and mean effective sample sizes; for the
-        iterative rules: the value after each update and the empirical
-        coverage that drove it).  Extra keys, present only when
-        an array ``initial_beta`` was given: ``"grid"`` (all evaluated
-        points, grid plus refinement mids), ``"initial_beta"`` (the scalar
-        start actually used) and, when a crossing was found, ``"slope"``
-        and ``"bracket"`` (the final bracket ``(lo, hi)`` in beta units).
+        Always contains the keys ``"betas"``, ``"coverages"`` and
+        ``"ess"`` (``list[float]`` each): the grid in increasing order with
+        its coverages and mean effective sample sizes for ``grid``, or the
+        value after each update and the empirical coverage that drove it
+        (and the mean effective sample size at each iteration) for the
+        iterative rules.  Extra keys, present only when an array
+        ``initial_beta`` was given: ``"grid"`` (the evaluated grid points
+        with their coverages and mean effective sample sizes),
+        ``"initial_beta"`` (the scalar start actually used) and, when a
+        crossing was found, ``"slope"`` and ``"bracket"`` (the bracket in
+        ``log(beta)`` after the final update).
 
     Raises
     ------

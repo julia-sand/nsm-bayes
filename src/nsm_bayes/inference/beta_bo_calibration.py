@@ -134,7 +134,12 @@ def optimize_beta_bisection(
     target_coverage=0.95,
     beta_min=1e-4,
 ):
-    """Bisection wrapper returning beta and GP-predicted coverage."""
+    """Bisection wrapper returning the calibrated ``beta``.
+
+    Fits a GP to the supplied ``(log beta, coverage)`` pairs and finds the
+    ``beta`` at which the GP mean crosses the target coverage; see
+    :func:`find_target_beta` for the return contract.
+    """
     model_gp = fit_gp(betas, coverages)
 
     return find_target_beta(
@@ -157,16 +162,16 @@ def optimize_beta_bo(
     n_iter=20,
 ):
     """
-    Optimize beta using noisy log-EI.
+    Calibrate ``beta`` so the coverage matches ``target_coverage``.
 
-    If posterior is provided:
-        Evaluate selected betas using
-        posterior.estimate_coverage(beta=beta).
-        Return the best observed beta and coverage.
+    If `posterior` is provided, each selected ``beta`` is evaluated with
+    ``posterior.estimate_coverage(beta=beta)`` and the best observed ``beta``
+    is returned.
 
-    If posterior is None:
-        Fit the GP to the supplied observations and use bisection.
-        Return beta and GP-predicted coverage without new evaluations.
+    If `posterior` is None, the GP is fit to the supplied observations and
+    bisection is used, with no new evaluations. This branch delegates to
+    :func:`optimize_beta_bisection` with its own defaults for
+    ``target_coverage`` and ``beta_min`` (they are not forwarded).
     """
     train_x, train_y = _training_tensors(betas, coverages)
 
@@ -221,7 +226,7 @@ def optimize_beta_bo(
         next_coverage = float(
             posterior.estimate_coverage(
                 beta=next_beta,
-            )
+            )[0]
         )
         new_y = train_y.new_tensor([[next_coverage]])
 

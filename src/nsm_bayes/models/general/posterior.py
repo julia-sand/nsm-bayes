@@ -19,7 +19,7 @@ score-matching loss of the trained flow :math:`q(x \mid \theta)`,
 
 Down-weighting outlying observations through :math:`w` makes the posterior
 robust to contamination; :math:`\beta` is chosen by
-:func:`~nsm_bayes.inference.calibrate_beta.calibrate_beta`.
+:func:`~nsm_bayes.inference.beta_calibration_loop.calibrate_beta`.
 """
 import functools
 import logging
@@ -295,7 +295,7 @@ class GeneralPosterior:
 
     # ------------------------------------------------------------------ #
     # Beta calibration: the two steps driven by                           #
-    # :func:`nsm_bayes.inference.calibrate_beta.calibrate_beta`.          #
+    # :func:`nsm_bayes.inference.beta_calibration_loop.calibrate_beta`.   #
     # ------------------------------------------------------------------ #
     def prepare_calibration(self,
                             beta: float,

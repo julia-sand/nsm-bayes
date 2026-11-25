@@ -87,7 +87,7 @@ class ConjugatePosterior():
 
     See Also
     --------
-    nsm_bayes.inference.calibrate_beta.calibrate_beta :
+    nsm_bayes.inference.beta_calibration_loop.calibrate_beta :
         Chooses ``beta`` for :meth:`compute_posterior`.
 
     Notes
@@ -399,7 +399,7 @@ class ConjugatePosterior():
 
     # ------------------------------------------------------------------ #
     # Beta calibration: the two steps driven by                           #
-    # :func:`nsm_bayes.inference.calibrate_beta.calibrate_beta`.          #
+    # :func:`nsm_bayes.inference.beta_calibration_loop.calibrate_beta`.   #
     # ------------------------------------------------------------------ #
     @torch.no_grad()
     def prepare_calibration(self,

@@ -137,8 +137,8 @@ class GeneralModel():
         x_obs : torch.Tensor
             Data at which the density is evaluated, shape ``(..., d_x)``.
         theta_vec : torch.Tensor
-            Conditioning parameters, shape ``(..., d_theta)``. Despite the
-            ``None`` default it is required by the estimator.
+            Conditioning parameters, shape ``(..., d_theta)``. Required by
+            the estimator.
 
         Returns
         -------

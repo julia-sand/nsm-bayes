@@ -37,7 +37,7 @@ def step_gpc(
     """The library's GPC step (reference rule):
     ``log_beta += clip(k_t * (coverage - target), +/-max_log_step)``, then
     floored at ``log(beta_min)``.  ``k_t = learning_rate_fn(t)``, by default
-    ``10 / (t + 10)``.  Bit-identical to the loop's inlined update.
+    ``10 / (t + 10)``.
 
     Parameters
     ----------
