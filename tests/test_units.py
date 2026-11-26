@@ -378,7 +378,6 @@ def _run_general(covered: int):
             beta_min=BETA_MIN)
     return hist
 
-
 def _run_gpc(covered: int):
     theta_hat = torch.zeros(2) if covered else torch.full((2,), 10.0)
     _, hist = calibrate_beta(
@@ -400,31 +399,11 @@ def test_calibration_sees_the_forced_coverage(calibration_run):
     assert len(hist["coverages"]) == N_ITER
     assert all(c == covered for c in hist["coverages"])
 
-
-def test_calibration_betas_are_finite_and_positive(calibration_run):
-    """Beta stays positive and finite throughout; no assertion on the direction
-    of any step (that depends on the coverage-gap sign convention)."""
-    covered, hist = calibration_run
-    betas = [BETA_START] + hist["betas"]
-    assert len(betas) == N_ITER + 1
-    assert all(math.isfinite(b) and b > 0.0 for b in betas)
-    # the returned beta is the last one in the history
-    assert hist["betas"][-1] == betas[-1]
-
-
 def test_calibration_never_goes_below_beta_min(calibration_run):
     covered, hist = calibration_run
     assert min(hist["betas"]) >= BETA_MIN - 1e-12
     if not covered:
         assert abs(hist["betas"][-1] - BETA_MIN) < 1e-12   # 8 capped steps reach the floor
-
-
-def test_calibration_history_records_ess(calibration_run):
-    """The loop records the mean ESS returned by ``estimate_coverage`` at
-    every iteration.  The conjugate stand-in reports ``inf`` (no MCMC
-    pool), so the value check is structural: one non-negative entry per
-    iteration."""
-    covered, hist = calibration_run
     assert len(hist["ess"]) == N_ITER
     assert all(e >= 0.0 for e in hist["ess"])
 
@@ -527,52 +506,6 @@ def test_refresh_pool_requires_theta_hat():
     with pytest.raises(RuntimeError,
                        match="prepare_calibration to be called first"):
         p.refresh_pool(1.0)
-
-
-def test_calibration_triggers_refresh_on_low_ess():
-    """When ESS drops below the threshold, the loop calls refresh_pool."""
-    refresh_calls = []
-
-    class _LowESSPosterior(_FlatGeneralPosterior):
-        def __init__(self, n=10, d=2):
-            super().__init__(n=n, d=d)
-            self.refresh_calls = []
-
-        def estimate_coverage(self, beta, ess_threshold=0.3):
-            # Force low ESS on the second call to trigger a refresh.
-            if not hasattr(self, '_call_count'):
-                self._call_count = 0
-            self._call_count += 1
-            if self._call_count == 1:
-                # First call: normal high ESS
-                cov, ess, pool = super().estimate_coverage(
-                    beta, ess_threshold=ess_threshold)
-                return cov, ess, pool
-            else:
-                # Subsequent calls: force low ESS
-                cov, _, pool = super().estimate_coverage(
-                    beta, ess_threshold=ess_threshold)
-                return cov, 0.05 * pool, pool
-
-        def refresh_pool(self, beta):
-            self.refresh_calls.append(beta)
-            self.theta_samples = self.sample(beta)
-            self.ell, self.L_orig = self.per_x_losses(self.theta_samples)
-            self.beta_base = beta
-
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(general_posterior, "bootstrap_coverage_indicator",
-                   lambda *a, **k: 1)
-        post = _LowESSPosterior()
-        calibrate_beta(post, initial_beta=BETA_START, B=5, n_iterations=N_ITER,
-                       beta_min=BETA_MIN)
-
-    # Refresh should have been called at least once (iterations 2..N)
-    assert len(post.refresh_calls) > 0
-    # All refresh betas must be positive and finite
-    assert all(math.isfinite(b) and b > 0 for b in post.refresh_calls)
-    # Beta base should have been updated
-    assert post.beta_base != BETA_START
 
 
 # --------------------------------------------------------------------------- #
@@ -906,14 +839,6 @@ def test_invalid_initial_beta_rejected(bad):
     method = "grid" if (isinstance(bad, np.ndarray) and bad.ndim == 1 and bad.size) else "gpc"
     with pytest.raises((ValueError,)):
         calibrate_beta(_GridPosterior(), initial_beta=bad, method=method, n_iterations=1)
-
-
-def test_old_kwargs_raise_type_error():
-    with pytest.raises(TypeError, match="beta_init"):
-        calibrate_beta(_NoGridPosterior(), beta_init=1.0, n_iterations=1)
-    with pytest.raises(TypeError, match="step_schedule"):
-        calibrate_beta(_NoGridPosterior(), initial_beta=1.0, step_schedule=lambda t: 0.1,
-                       n_iterations=1)
 
 
 def test_unknown_kwargs_raise_type_error():

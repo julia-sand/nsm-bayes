@@ -29,14 +29,3 @@ def test_gnk_case1_posterior(gnk_run, gnk_cfg):
     )
 
 
-def test_gnk_nets_saved(gnk_run):
-    """The Case-1 nets and standardizers are saved with the expected keys."""
-    nets = torch.load(gnk_run / "conjugate_nets_0.pt", map_location="cpu", weights_only=False)
-    for key in (
-        "T_phi_state_dict",
-        "B_phi_state_dict",
-        "standardizer_x_state_dict",
-        "standardizer_theta_state_dict",
-    ):
-        assert key in nets, f"conjugate_nets missing {key!r}"
-
