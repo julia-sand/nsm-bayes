@@ -67,8 +67,7 @@ matching, so the `1-α` credible region has `1-α` frequentist coverage.
 │       │   ├── add_noise.py        # misspecification helpers
 │       │   ├── benchmark_simulators/  # g-and-k, SIR and Turin simulators
 │       │   └── fromdata.py         # pkl loader + Gaussian MLE
-│       ├── utils/          # linear algebra, robust statistics, weights, seeding
-│       └── viz/            # plotting scripts (plot_gnk)
+│       └── utils/          # linear algebra, robust statistics, weights, seeding
 ├── tests/              # pytest regression + unit tests
 ├── .gitignore
 ├── AGENTS.md
@@ -144,7 +143,6 @@ Core dependencies are declared in `pyproject.toml`, including:
 
 - `botorch` (pulls in `gpytorch`, imported directly by `inference/beta_bo_calibration.py`)
 - `hydra-core` / `omegaconf`
-- `matplotlib`
 - `numpy` (`>=1.26.4`)
 - `scikit-learn`
 - `sbi` (`>=0.27,<0.28`)

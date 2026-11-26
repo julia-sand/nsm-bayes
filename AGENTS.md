@@ -45,7 +45,6 @@ src/nsm_bayes/
   utils/                     linalg (sigma_inverse, safe_cholesky, jacobians),
                              statistics (robust/sample moments), weights (imq/huber/none),
                              misc (set_seed)
-  viz/plot_gnk.py            corner plot overlaying samples_sm + samples_nle_mis
 tests/                       pytest regression + unit tests (conftest has fixtures/stubs)
 examples/                    notebooks (may lag the package API)
 ```
@@ -225,8 +224,7 @@ change and must go in the CHANGELOG.
   running an experiment with a small config before and after and comparing
   the pickles.
 - When moving or renaming modules, update in the same change: all imports in
-  `src/`, `scripts/`, `tests/`, `examples/*.ipynb`,
-  `src/nsm_bayes/viz/plot_gnk.py`, the README structure tree, and the
-  CHANGELOG.
+  `src/`, `scripts/`, `tests/`, `examples/*.ipynb`, the README structure
+  tree, and the CHANGELOG.
 - Never commit `data/`, `outputs/`, `sbi-logs/`, checkpoints or
   `__pycache__/`.

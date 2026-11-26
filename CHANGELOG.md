@@ -57,6 +57,14 @@ All notable changes to this project will be documented in this file.
 - **Behaviour change:** the conjugate calibrator no longer prints its per-iteration progress and final beta (the `tqdm` bar is gone); the returned `(beta, history)` are unaffected.
 - Example notebooks updated to the new API: `sir_conjugate.ipynb` and `fromdata.ipynb` (conjugate: `calibrate_beta(posterior, beta_init=..., alpha=..., n_iterations=..., B=..., x_obs=...)`) and `gnk_general.ipynb` (general: `calibrate_beta(posterior, beta_init=..., ...)`).
 
+### Changed
+
+- The eight per-experiment end-to-end pipeline test files were consolidated into `tests/test_run_pipelines.py`: the per-experiment run-and-assert checks (each of which only instantiated the experiment, chose the method step, called `common.run_experiment` and checked the posterior artifacts) became one parametrized `test_pipeline_posterior` (4 experiments x 2 methods = 8 cases) that also adds a `beta >= beta_min` assertion via the existing `conftest.assert_posterior_artifacts`; the experiment-specific data-invariant tests that lived in the deleted files moved over verbatim. No test was lost or weakened and no library code changed, so results are unaffected; the full suite (88 tests) passes.
+
+### Removed
+
+- The eight per-experiment pipeline test files `tests/test_run_gnk.py`, `tests/test_run_gnk_conjugate.py`, `tests/test_run_sir.py`, `tests/test_run_sir_conjugate.py`, `tests/test_run_sir_undercounting.py`, `tests/test_run_sir_undercounting_conjugate.py`, `tests/test_run_turin.py` and `tests/test_run_turin_conjugate.py`: their contents were consolidated into `tests/test_run_pipelines.py` (see the corresponding `Changed` entry above). `tests/test_units.py` and `tests/test_surrogate_checkpoint.py` are unchanged.
+
 ### Removed
 
 - `requirements.txt`: it was a two-line duplicate of the `pyproject.toml`-managed dependencies (`-e .` plus a comment pointing at pyproject).
@@ -110,3 +118,7 @@ All notable changes to this project will be documented in this file.
 - **Behaviour change:** `GeneralPosterior._per_x_sm_loss` called the raw estimator as `self.flow.estimator.log_prob(xi, theta).reshape(1)` with `xi` of shape `(d_x,)` and a commented-out fallback. Under sbi 0.27 the flow's `log_prob` interprets the leading dimension as `sample_dim` (`(sample_dim, batch_dim)`), so a 1-D `xi` was mis-read as `sample_dim=d_x` and the broadcast against the 100-condition batch produced a `(d_x, 100)` result (400 elements for g-and-k, `d_x=4`) that the `.reshape(1)` could not flatten, raising `RuntimeError: shape '[100, 1]' is invalid for input of size 400` in `GeneralPosterior.sample` and `calibrate_beta`. The call now goes through `GeneralModel.log_prob(xi, theta_vec=theta)`, which batches `xi` to `(1, d_x)` so the estimator sees one input row per condition; the `-1e10` clamp of `GeneralModel.log_prob` also now applies to the score-matching loss, matching the NLE baseline.
 - Removed broken dead imports (`compute_posterior_case1`) that made `scripts/normflow/run_gnk.py` and `scripts/normflow/run_sir_undercounting.py` fail at import time.
 - `tests/test_run_gnk.py` loads the checkpoint written by `save_checkpoint` (`conjugate_nets_*.pt`).
+
+### Removed
+
+- `nsm_bayes.viz` module (containing `plot_gnk.py` for corner-plot overlays of `samples_sm` vs `samples_nle_mis`) and the `matplotlib` dependency from `pyproject.toml`: the module was not imported anywhere in `src/`, `scripts/` or `tests/` and its plotting utility is available in the example notebooks. **Behaviour change:** `matplotlib` is no longer installed as a hard dependency; users who need the corner-plot overlay must install it separately (or use the example notebooks).

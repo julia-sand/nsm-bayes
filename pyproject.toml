@@ -12,7 +12,6 @@ dependencies = [
     "botorch>=0.11",  # 0.11+ is the numpy-2-compatible line; version-pinning botorch pulls gpytorch
     "gpytorch",  # direct import in inference/beta_bo_calibration.py; version pinned by botorch
     "hydra-core>=1.3.2,<2",
-    "matplotlib>=3.7",
     "numpy>=1.26.4",  # no <2 upper bound: the stack (torch, sbi, nflows, zuko, gpytorch, botorch) is numpy-2 compatible
     "omegaconf>=2.3,<3",
     "scikit-learn>=1.4.2,<2",

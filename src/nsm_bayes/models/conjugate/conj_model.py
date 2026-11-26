@@ -13,7 +13,6 @@ Both ``x`` and ``theta`` are standardised before training; the fitted
 standardisers are stored on the model.
 """
 
-import logging
 from pathlib import Path
 
 import torch
@@ -22,8 +21,6 @@ from torch import nn
 from nsm_bayes.models.conjugate.bphi_net import BphiNet
 from nsm_bayes.models.conjugate.conj_train import train_q_phi
 from nsm_bayes.models.conjugate.tphi_net import TphiNet
-
-_log = logging.getLogger(__name__)
 
 
 class TorchStandardizer(nn.Module):
@@ -435,12 +432,4 @@ class EnergyBasedModel(nn.Module):
                 f"chain ({tuple(linears[0].shape)} -> {tuple(linears[1].shape)})."
             )
 
-        if linears[1].shape[0] != int(std_theta_state["mean"].numel()):
-            # Warn only -- the standardiser may have been built with a
-            # different d_theta in an older checkpoint format.
-            _log.warning(
-                "Inferred d_theta=%d from T_phi weights does not match "
-                "standardizer_theta size=%d.",
-                d_theta, int(std_theta_state["mean"].numel()),
-            )
         return d_x, d_theta, hidden_dim
