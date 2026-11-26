@@ -15,10 +15,7 @@ from nsm_bayes.experiments import common, turin
 @hydra.main(version_base=None, config_path="../../configs", config_name="turin")
 def run_turin(cfg: DictConfig):
     """Hydra entry point for the Turin channel-model experiment."""
-    save_dir = (
-        Path(get_original_cwd()) / "data" / cfg.experiment_name / "general"
-        / f"eps={cfg.epsilon}" / f"de={cfg.density_estimator}"
-    )
+    save_dir = Path(get_original_cwd()) / "data" / cfg.experiment_name / "general"
     common.run_experiment(cfg, turin, common.run_normflow_methods, save_dir)
 
 
