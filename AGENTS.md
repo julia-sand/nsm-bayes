@@ -64,7 +64,6 @@ python -m venv .venv && source .venv/bin/activate
 python -m pip install -e . pytest
 
 # Run an experiment (results go to ./data/<experiment_name>/{general|conjugate}/;
-# turin adds eps=<epsilon>/de=<density_estimator> subfolders)
 python scripts/normflow/run_gnk.py num_repeat=2
 python scripts/conjugate/run_sir.py robust_flag=true
 python scripts/normflow/run_turin.py density_estimator=maf

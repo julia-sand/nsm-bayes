@@ -155,7 +155,7 @@ def coverage_on_grid(grid,coverage_fn):
     covs, esss = [], []
     for b in grid:
         cov, ess, _ = coverage_fn(b)
-        print(rf"For $\beta=${b}, Coverage is {cov}")
+        print(rf"For beta = {b}, Coverage is {cov}")
         covs.append(float(cov))
         esss.append(float(ess))
 

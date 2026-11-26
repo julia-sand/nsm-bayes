@@ -198,7 +198,7 @@ def optimize_beta_bo(
     objective = GenericMCObjective(
         lambda samples, X=None: -(
             samples[..., 0] - target_coverage
-        ).abs()
+        ).square()
     )
 
     sampler = SobolQMCNormalSampler(

@@ -199,7 +199,7 @@ def _iterative_loop(
         
         betas.append(math.exp(log_beta))
         coverages.append(c_hat)
-        print(rf"For $\beta=${betas[-1]}, Coverage is {coverages[-1]}")
+        print(rf"For beta = {betas[-1]}, Coverage is {coverages[-1]}")
 
         # ESS-gated pool refresh (normflow only; conjugate ESS is always inf, so will be skipped).
         # Uses fixed rate k_t = 10/(10+B), so the refresh beta is a small local step around the

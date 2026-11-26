@@ -6,25 +6,21 @@ experimental scripts for a misspecified (contaminated) observation model.
 
 ## Overview
 
-The project runs two inference methods on four benchmark simulators
-(`gnk`, `sir`, `sir_undercounting`, `turin`):
+The project runs a Bayesian inference method. The loss is 
 
-- **normflow** ("general"): trains an sbi `NLE_A` normalising flow as a
+There are two surrogate likelihood models used: 
+
+- **normflow**: This is an sbi `NLE_A` normalising flow as the
   likelihood surrogate, builds the generalised posterior
   `π(θ)·exp(-β·n·L_NSM(θ; x))` and samples it with a slice sampler.
-- **conjugate** ("case 1"): trains a neural exponential family
-  (`T_φ`, `b_φ`) by score matching; the generalised posterior is Gaussian
-  in closed form.
+- **conjugate**: trains a neural exponential family
+  (`T_φ`, `b_φ`) by score matching. The generalised posterior then has a closed form.
 
-Both calibrate the tempering parameter **β** by bootstrap coverage
-matching, so the `1-α` credible region has `1-α` frequentist coverage.
+The score-matching losses are weighted, and the inverse temperature **β** for generalised Bayesian inference is calibrated such that the `1-α` credible region has `1-α` frequentist coverage.
 
-- `src/nsm_bayes/` package code: simulators, samplers, the general
-  (normalising-flow) and conjugate (score-matching) methods, and the shared
-  experiment drivers
-- `scripts/` Hydra entry points, one per method (normflow / conjugate) and
-  experiment (gnk, sir, sir_undercounting, turin)
-- reproducible Python environment configuration via `pyproject.toml`
+Walkthrough notebooks demonstrating the two methods are found in the `examples` directory, for the [SIR simulator with the conjugate model](examples/sir_conjugate.ipynb), and the [GnK simulator with normflow model](examples/gnk_general.ipynb). 
+
+There are four benchmark example data simulators used (`gnk`, `sir`, `sir_undercounting`, `turin`), but any numpy-compatible data can be passed into the method: see [from data](examples/fromdata.ipynb). 
 
 ## Repository structure
 
@@ -78,64 +74,23 @@ matching, so the `1-α` credible region has `1-α` frequentist coverage.
 
 ## Installation
 
-Requires Python 3.10–3.12 (on 3.13 `nflows`/`antlr` fail to build; the
-dependency stack is numpy-2 compatible, so no numpy upper bound is set).
+Requires Python 3.10–3.12.
 
 ```bash
 python -m pip install -e .
 ```
 
-For development (tests):
+## Reproducing the Results
 
-```bash
-python -m pip install pytest
-```
-
-## Usage
-
-Each experiment script is a standalone Hydra app, so config values can be
-overridden on the command line:
+Standard experiments use configuration from configs/ and pass them into scripts using Hydra. Config values can be overridden on the command line. Some examples of how to run the experiments: 
 
 ```bash
 python scripts/normflow/run_gnk.py num_repeat=2
 python scripts/conjugate/run_sir.py
-python scripts/conjugate/run_sir_undercounting.py robust_flag=true
-python scripts/normflow/run_turin.py density_estimator=maf
+python scripts/conjugate/run_sir_undercounting.py robust_flag=false
 ```
 
-Results are written to `data/<experiment_name>/<method>/` under the directory
-you launch from, where `<method>` is `general` for the `scripts/normflow/` runs
-and `conjugate` for the `scripts/conjugate/` runs; the Turin experiments
-additionally use `eps=<epsilon>/de=<density_estimator>` subfolders.
-
-The β calibration strategy is the `calibration_method` config key
-(`gpc`, `bisect` or `grid`; the latter two need the `beta_base_*` value as a
-1-D array).
-
-A new experiment script is a short Hydra entry point that passes one
-experiment module (for example `nsm_bayes.experiments.gnk`) and one method
-step (`run_normflow_methods` or `run_conjugate_method`) to
-`nsm_bayes.experiments.common.run_experiment`.
-
-## Testing
-
-Run from the repository root (tests read `configs/*.yaml` by relative path):
-
-```bash
-python -m pytest -q
-```
-
-## API documentation
-
-All modules, classes and functions in `src/nsm_bayes/` carry
-[NumPy-style docstrings](https://numpydoc.readthedocs.io/en/latest/format.html).
-Use `help()` in Python, or check them with numpydoc (the validation config
-lives in `pyproject.toml`):
-
-```bash
-python -m pip install numpydoc
-python -m numpydoc lint $(find src/nsm_bayes -name '*.py')
-```
+Results of each run are written to `data/<experiment_name>/<method>/` in the same directory they were run.
 
 ## Dependencies
 
@@ -148,6 +103,6 @@ Core dependencies are declared in `pyproject.toml`, including:
 - `sbi` (`>=0.27,<0.28`)
 - `torch`
 
-## Licence
+## License
 
 MIT — see [LICENSE](LICENSE).
