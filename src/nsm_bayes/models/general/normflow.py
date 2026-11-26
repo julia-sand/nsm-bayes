@@ -1,7 +1,7 @@
 """Normalising-flow likelihood model for the general NSM-Bayes method.
 
 The general method learns a conditional density ``q(x | theta)`` with sbi's
-neural likelihood estimation (``SNLE``), by default with a masked
+neural likelihood estimation (``NLE_A``), by default with a masked
 autoregressive flow (``"maf"``). The trained flow is used in two ways:
 
 * as an ordinary likelihood, to sample the baseline NLE posterior
@@ -14,7 +14,7 @@ wraps them.
 """
 import torch
 
-from sbi.inference import SNLE
+from sbi.inference import NLE_A
 
 class GeneralModel():
     """Neural likelihood estimator from sbi, with save/load and sampling.
@@ -27,12 +27,12 @@ class GeneralModel():
     mcmc_settings : MCMCSettings
         Sampler settings for :meth:`sample_nle_posterior`.
     density_estimator : str, default "maf"
-        Density estimator name passed to ``sbi.inference.SNLE``
+        Density estimator name passed to ``sbi.inference.NLE_A``
         (e.g. ``"maf"``, ``"nsf"``, ``"mdn"``).
 
     Attributes
     ----------
-    trainer : sbi.inference.SNLE
+    trainer : sbi.inference.NLE_A
         The sbi inference object.
     estimator : torch.nn.Module or None
         Trained conditional density estimator; ``None`` until :meth:`fit`
@@ -54,7 +54,7 @@ class GeneralModel():
         self.prior = prior
         if self.prior.loc.dtype != torch.float32:
             raise TypeError("Mismatch in data type. SBI requires a float32 prior")
-        self.trainer = SNLE(self.prior,density_estimator=density_estimator)
+        self.trainer = NLE_A(self.prior,density_estimator=density_estimator)
         self.mcmc = mcmc_settings
         self.estimator = None
         self.train_history = None
