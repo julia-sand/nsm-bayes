@@ -425,7 +425,7 @@ class EnergyBasedModel(nn.Module):
         hidden_dim, d_x = linears[0].shape
         d_theta = linears[1].shape[0]
 
-        # Sanity check: the two linear layers must chain.
+        # Validation: the two linear layers must chain.
         if linears[1].shape[1] != hidden_dim:
             raise ValueError(
                 "Cannot infer T_phi dimensions: linear layer shapes do not "

@@ -147,3 +147,7 @@ Core dependencies are declared in `pyproject.toml`, including:
 - `scikit-learn`
 - `sbi` (`>=0.27,<0.28`)
 - `torch`
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
