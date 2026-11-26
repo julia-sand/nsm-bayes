@@ -18,9 +18,6 @@ class BphiNet(nn.Module):
     hidden_dim : int
         Width of the hidden layer.
 
-    See Also
-    --------
-    TphiNet : The sufficient-statistic network.
     """
 
     def __init__(self, input_dim: int, hidden_dim: int):

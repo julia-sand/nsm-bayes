@@ -21,9 +21,6 @@ class TphiNet(nn.Module):
     output_dim : int
         Parameter dimension ``d_theta``.
 
-    See Also
-    --------
-    BphiNet : The base-measure network.
     """
 
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):

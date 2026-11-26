@@ -16,10 +16,6 @@ score-matching loss of the trained flow :math:`q(x \mid \theta)`,
         + 2\, \nabla w^2(x)^\top s_\theta(x)
         + 2\, w^2(x)\, \Delta_x \log q(x \mid \theta),
     \qquad s_\theta(x) = \nabla_x \log q(x \mid \theta).
-
-Down-weighting outlying observations through :math:`w` makes the posterior
-robust to contamination; :math:`\beta` is chosen by
-:func:`~nsm_bayes.inference.beta_calibration_loop.calibrate_beta`.
 """
 import functools
 import logging
