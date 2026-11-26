@@ -19,6 +19,9 @@ score-matching loss of the trained flow :math:`q(x \mid \theta)`,
 """
 import functools
 import logging
+from collections.abc import Mapping
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import torch
@@ -31,7 +34,6 @@ from nsm_bayes.inference.bootstrap import (
     reweight_for_bootstrap_beta,
 )
 from nsm_bayes.inference.slice_sampler import run_multivariate_slice_sampler_tuned
-from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.weights import weight_function
@@ -51,9 +53,12 @@ class GeneralPosterior:
         Model with a trained :attr:`~GeneralModel.estimator`.
     prior : torch.distributions.Distribution
         Prior over ``theta``.
-    mcmc : MCMCSettings, optional
-        Slice-sampler settings for :meth:`sample`. Defaults to
-        ``MCMCSettings()``.
+    mcmc : Mapping[str, Any]
+        Slice-sampler settings for :meth:`sample`: ``num_chains``,
+        ``warmup_steps`` and ``thin``.
+    num_samples : int
+        Number of samples to retain per chain (the total when
+        ``thin == 1``).
     robust : bool, default True
         Centre and scale the weights with the median and MCD covariance of
         `x_obs` (true) or the sample mean and covariance (false).
@@ -93,7 +98,8 @@ class GeneralPosterior:
     def __init__(self, x_obs,
                     flow_model,  
                     prior,
-                    mcmc: MCMCSettings | None = None,
+                    mcmc: Mapping[str, Any],
+                    num_samples: int,
                     robust: bool = True,
                     weight_type: str = "imq",
                     c: float = 1.0):
@@ -101,7 +107,8 @@ class GeneralPosterior:
         self.flow = flow_model
         self.x_obs = x_obs
         self.prior = prior
-        self.mcmc = mcmc if mcmc is not None else MCMCSettings()
+        self.mcmc = dict(mcmc)
+        self.num_samples = num_samples
         self.robust, self.weight_type, self.c = robust, weight_type, c
         self.n_obs = x_obs.shape[0]
 
@@ -233,6 +240,27 @@ class GeneralPosterior:
             return -np.inf
         return float(lp - beta * self.n_obs * self.sm_loss(theta))
 
+    def _sampler_settings(self) -> SimpleNamespace:
+        """Build the settings object read by the slice sampler.
+
+        :func:`run_multivariate_slice_sampler_tuned` reads its settings as
+        attributes, so the plain :attr:`mcmc` dict plus :attr:`num_samples`
+        are wrapped in a namespace.
+
+        Returns
+        -------
+        types.SimpleNamespace
+            With attributes ``num_samples`` (int), ``num_chains`` (int),
+            ``warmup_steps`` (int) and ``thin`` (int).
+        """
+        mcmc = self.mcmc
+        return SimpleNamespace(
+            num_samples=self.num_samples,
+            num_chains=mcmc["num_chains"],
+            warmup_steps=mcmc["warmup_steps"],
+            thin=mcmc["thin"],
+        )
+
     def sample(self, beta: float) -> Tensor:
         """Draw samples from the generalised posterior.
 
@@ -252,7 +280,7 @@ class GeneralPosterior:
         samples = run_multivariate_slice_sampler_tuned(
                             log_posterior_fn=functools.partial(self.posterior_log_prob, beta=beta),
                             prior=self.prior,
-                            mcmcsettings=self.mcmc
+                            mcmcsettings=self._sampler_settings()
                         )
         return torch.from_numpy(samples).to(dtype=self.x_obs.dtype, device=self.x_obs.device)
 

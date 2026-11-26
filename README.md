@@ -16,7 +16,7 @@ There are two surrogate likelihood models used:
 - **conjugate**: trains a neural exponential family
   (`T_φ`, `b_φ`) by score matching. The generalised posterior then has a closed form.
 
-The score-matching losses are weighted, and the inverse temperature **β** for generalised Bayesian inference is calibrated such that the `1-α` credible region has `1-α` frequentist coverage.
+The score-matching losses are weighted, and the inverse temperature β for generalised Bayesian inference is calibrated such that the `1-α` credible region has `1-α` frequentist coverage.
 
 Walkthrough notebooks demonstrating the two methods are found in the `examples` directory, for the [SIR simulator with the conjugate model](examples/sir_conjugate.ipynb), and the [GnK simulator with normflow model](examples/gnk_general.ipynb). 
 
@@ -58,7 +58,7 @@ There are four benchmark example data simulators used (`gnk`, `sir`, `sir_underc
 │       │   ├── conjugate/          # EnergyBasedModel, score-matching training,
 │       │   │                        # closed-form ConjugatePosterior, T_phi/b_phi nets
 │       │   └── general/            # sbi flow wrapper (GeneralModel),
-│       │                            # GeneralPosterior, MCMCSettings
+│       │                            # GeneralPosterior
 │       ├── simulators/
 │       │   ├── add_noise.py        # misspecification helpers
 │       │   ├── benchmark_simulators/  # g-and-k, SIR and Turin simulators

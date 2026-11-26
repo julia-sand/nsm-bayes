@@ -31,8 +31,10 @@ def run_multivariate_slice_sampler_tuned(
         the support; must not return NaN.
     prior : torch.distributions.Distribution
         Used only to draw one initial state per chain.
-    mcmcsettings : MCMCSettings
-        Number of chains, retained samples, warm-up steps and thinning.
+    mcmcsettings : object
+        Object exposing ``num_samples``, ``num_chains``, ``warmup_steps``
+        and ``thin`` as attributes (e.g. a ``types.SimpleNamespace``);
+        see :meth:`nsm_bayes.models.general.posterior.GeneralPosterior._sampler_settings`.
     initial_w : float, default 1.0
         Initial bracket width for the univariate slice steps.
     seed : int, optional

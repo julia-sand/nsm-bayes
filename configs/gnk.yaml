@@ -20,9 +20,6 @@ outlier_values: [-50.0]         # Position of the outliers
 robust_flag: false
 
 num_posterior_samples: 500            # Number of posterior samples
-num_chains: 1 
-warmup_steps: 500
-thin: 1
 
 beta_base_general: 1.0           # A reasonable starting value for beta for the general case
 beta_base_case1: 0.1           # A reasonable starting value for beta for case 1

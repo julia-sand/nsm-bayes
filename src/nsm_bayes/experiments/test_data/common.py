@@ -15,7 +15,9 @@ from types import ModuleType
 from typing import Callable
 
 import torch
-from omegaconf import DictConfig, OmegaConf
+from hydra import compose, initialize_config_dir
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import DictConfig
 
 from nsm_bayes.utils import set_seed
 
@@ -36,8 +38,15 @@ CONFIG_DIR = REPO_ROOT / "configs"
 
 
 def load_config(name: str, **overrides) -> DictConfig:
-    """Load ``configs/<name>.yaml`` with the capped bundle-size overrides."""
-    cfg = OmegaConf.load(CONFIG_DIR / f"{name}.yaml")
+    """Load ``configs/<name>.yaml`` with the capped bundle-size overrides.
+
+    Composed through Hydra (not ``OmegaConf.load``) so ``defaults``
+    inheritance (e.g. the shared ``mcmc`` block in ``_base.yaml``) is
+    resolved.
+    """
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        cfg = compose(config_name=name)
     for key, value in overrides.items():
         cfg[key] = value
     return cfg

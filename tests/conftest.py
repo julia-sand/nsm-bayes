@@ -55,9 +55,8 @@ def _tiny_base(name: str) -> dict:
             "num_samples": 256,      # training-data size
             "n_obs": 40,             # observed-data size
             "num_posterior_samples": 30,
-            "num_chains": 1,
-            "warmup_steps": 15,
-            "thin": 1,
+            "mcmc": {"num_chains": 1, "warmup_steps": 15, "thin": 1,
+                     "init_strategy": "proposal"},
             "T": 2,                  # beta-calibration iterations
             "B": 6,                  # bootstraps per iteration
         }

@@ -1,7 +1,7 @@
 # AGENTS.md — nsm-bayes
 
 Guidance for AI coding agents (and humans) working in this repository.
-Written against commit `d14d1af` (2026-11-25). If the code and this file
+Written against commit `eca80a5` (2026-11-26). If the code and this file
 disagree, trust the code and update this file.
 
 ## What this project is
@@ -31,10 +31,15 @@ configs/                     Hydra configs: _base.yaml + one per experiment
 scripts/{normflow,conjugate}/run_<exp>.py   thin Hydra entry points (8 total)
 src/nsm_bayes/
   experiments/common.py      ExperimentData, run_experiment, the two method steps, save/timed
+  experiments/runner.py      resolve(cfg) dispatch on method/experiment for a single entry point
   experiments/<exp>.py       build_problem(cfg) + generate_data(...) per experiment
-  experiments/test_data/     capped data bundles + checkpoints for the examples/ notebooks
-  models/general/            GeneralModel (NLE_A wrapper), GeneralPosterior, MCMCSettings
-  models/conjugate/          EnergyBasedModel, TphiNet/BphiNet, train_q_phi, ConjugatePosterior
+  experiments/test_data/     make_test_data_* builders for the capped data bundles +
+                             checkpoints the examples/ notebooks load (bundles are
+                             generated into examples/experimental/data/, not committed)
+  models/general/            normflow (GeneralModel, NLE_A wrapper),
+                             posterior (GeneralPosterior)
+  models/conjugate/          conj_model (EnergyBasedModel), conj_train (train_q_phi),
+                             conj_posterior (ConjugatePosterior), tphi_net/bphi_net
   inference/bootstrap.py     bootstrap counts, importance reweighting, coverage indicator
   inference/slice_sampler.py multivariate random-direction slice sampler (general method)
   inference/beta_calibration_loop.py  calibrate_beta (gpc/bisect/grid dispatch)
@@ -43,11 +48,20 @@ src/nsm_bayes/
   simulators/                benchmark_simulators/ (gandk, sir, turin),
                              add_noise.py (contamination), fromdata.py (pkl loader + Gaussian MLE)
   utils/                     linalg (sigma_inverse, safe_cholesky, jacobians),
-                             statistics (robust/sample moments), weights (imq/huber/none),
-                             misc (set_seed)
-tests/                       pytest regression + unit tests (conftest has fixtures/stubs)
+                             statistics (robust/sample moments, chi2_ppf),
+                             weights (imq/huber/none), misc (set_seed)
+tests/                       test_run_pipelines.py (end-to-end + data invariants),
+                             test_units.py (known-answer), test_surrogate_checkpoint.py;
+                             conftest has fixtures/stubs
 examples/                    notebooks (may lag the package API)
 ```
+
+Note: a single unified entry point is in progress (uncommitted):
+`experiments/runner.py` dispatches on top-level `method` / `experiment`
+config keys, and `scripts/run.py` / `scripts/runner.py` are its draft entry
+points. The eight committed scripts above remain the supported way to run
+experiments; the in-progress runner also restores
+`eps=<epsilon>/de=<density_estimator>` subfolders for turin.
 
 Note: the **Unreleased** section of the CHANGELOG still mentions
 `nsm_bayes.method`, `nsm_bayes.posterior`, `nsm_bayes.slice_sampler` and
@@ -70,10 +84,10 @@ python scripts/normflow/run_turin.py density_estimator=maf
 
 # Tests (always from the repo root: tests read configs/*.yaml by relative path)
 python -m pytest -q
-python -m pytest -q tests/test_run_gnk_conjugate.py   # one experiment
+python -m pytest -q tests/test_run_pipelines.py -k gnk   # one experiment
 ```
 
-The full suite takes ~5 min on CPU. Run the single relevant test file while
+The full suite (88 tests) takes ~5 min on CPU. Run the single relevant test file while
 iterating, and the full suite before you finish.
 
 ## Core design invariants — do not break these
@@ -82,7 +96,8 @@ iterating, and the full suite before you finish.
    for a repetition (training + observed), saves it, and only then calls the
    method step. This is what makes the normflow and conjugate variants
    see **bit-identical data** for the same seed, and
-   `tests/test_run_gnk.py::test_gnk_data_identical_across_methods` enforces it.
+   `tests/test_run_pipelines.py::test_gnk_data_identical_across_methods`
+   enforces it.
    Never draw random numbers for
    data inside a method step, and never reorder RNG calls inside
    `generate_data` without expecting every saved dataset to change.
@@ -98,9 +113,9 @@ iterating, and the full suite before you finish.
    A new script is just: pick an experiment module + a method step, call
    `common.run_experiment`. Keep scripts thin; logic belongs in `src/`.
 5. **No outputs in the repo.** Scripts write to
-   `get_original_cwd()/data/<experiment_name>/{general|conjugate}/` (turin
-   adds `eps=<epsilon>/de=<density_estimator>` subfolders); tests write to
-   `tmp_path`. `data/` and `outputs/` are git-ignored.
+   `get_original_cwd()/data/<experiment_name>/{general|conjugate}/` (flat for
+   every experiment); tests write to `tmp_path`. `data/` and `outputs/` are
+   git-ignored.
 
 ## Numerical conventions
 
@@ -143,8 +158,11 @@ iterating, and the full suite before you finish.
 - Don't hard-code hyperparameters in scripts or method steps. Defaults that
   every experiment shares belong as function defaults (e.g. IMQ `c=1.0`,
   step schedule), not repeated overrides.
-- `MCMCSettings.from_cfg(cfg)` is the single place MCMC keys are read
-  (`num_posterior_samples`, `num_chains`, `warmup_steps`, `thin`).
+- MCMC settings live in the `mcmc:` config block (`num_chains`,
+  `warmup_steps`, `thin`, `init_strategy`); `run_normflow_methods` converts
+  it to a plain dict (`OmegaConf.to_container(cfg.mcmc, resolve=True)`) and
+  passes it, plus `num_posterior_samples` as `num_samples`, to
+  `GeneralModel` and `GeneralPosterior`.
 
 ## Output artifacts
 
@@ -180,18 +198,23 @@ change and must go in the CHANGELOG.
   `normflow.NLE_A` → `_StubNLE`, and `train_q_phi` capped to 2 epochs.
   **When you change how library code calls the flow** (method names, kwargs
   like `condition=`), update `_StubNLE` to match the real sbi surface.
-- Tests assert structure and sanity, not exact numbers: shapes, finiteness,
-  symmetric PD covariance, `β ≥ beta_min`, history keys, cross-method data
-  identity (`tests/test_run_gnk.py::test_gnk_data_identical_across_methods`),
-  and `tests/test_run_gnk.py::test_gnk_data_changes_with_seed` (a different
-  seed must give different data). Experiment-specific data invariants
-  (e.g. `test_gnk_observed_data`, `test_sir_uc_undercounting_is_one_sided`)
-  call `generate_data` directly instead of re-running the pipeline.
+- The end-to-end cases are one parametrized test, `test_pipeline_posterior`
+  (4 experiments × 2 methods), in `tests/test_run_pipelines.py`. Tests assert
+  structure and sanity, not exact numbers: shapes, finiteness, symmetric PD
+  covariance, `β ≥ beta_min`, history keys, cross-method data identity
+  (`test_gnk_data_identical_across_methods`), and
+  `test_gnk_data_changes_with_seed` (a different seed must give different
+  data). Experiment-specific data invariants (e.g.
+  `test_gnk_observed_data`, `test_sir_uc_undercounting_is_one_sided`) call
+  `generate_data` directly instead of re-running the pipeline.
 - `tests/test_units.py` holds known-answer unit tests: g-and-k quantiles vs
-  the closed form, SIR parameter transforms, weighted moments vs sample
-  moments, jacobians/Laplacians on quadratics vs the analytic answer, the
-  slice sampler recovering a known Gaussian, and calibration moving β the
-  right way while respecting `beta_min`.
+  the closed form, SIR parameter transforms and summaries, weighted
+  moments/quantiles vs sample moments, bootstrap counts and importance
+  reweighting, jacobians/Laplacians on quadratics vs the analytic answer, the
+  slice sampler recovering a known Gaussian, `EnergyBasedModel` checkpoint
+  round-trips, the SA/GPC/bisect/grid update rules, `calibrate_beta`'s strict
+  argument validation, `chi2_ppf` vs tabulated quantiles, and the BO
+  (`optimize_beta_bo`) calibration.
 - Write unit tests for numerical helpers against a reference, parametrised
   over `d=1` and `d>1` — the scalar `d_x=1` path is special-cased in several
   helpers.

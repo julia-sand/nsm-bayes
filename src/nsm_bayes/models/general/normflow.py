@@ -13,6 +13,7 @@ The flow architecture and training loop come from ``sbi``; this module only
 wraps them.
 """
 import torch
+from typing import Any, Mapping
 
 from sbi.inference import NLE_A
 
@@ -24,8 +25,13 @@ class GeneralModel():
     prior : torch.distributions.Distribution
         Prior over ``theta``. Must expose ``loc`` with dtype
         ``torch.float32``, as sbi requires.
-    mcmc_settings : MCMCSettings
-        Sampler settings for :meth:`sample_nle_posterior`.
+    mcmc : Mapping[str, Any]
+        Sampler settings for :meth:`sample_nle_posterior`, passed through
+        to sbi's posterior ``sample`` as ``**mcmc`` (``num_chains``,
+        ``warmup_steps``, ``thin``, ``init_strategy``).
+    num_samples : int
+        Total number of posterior samples to draw (sbi's total, across
+        chains).
     density_estimator : str, default "maf"
         Density estimator name passed to ``sbi.inference.NLE_A``
         (e.g. ``"maf"``, ``"nsf"``, ``"mdn"``).
@@ -37,8 +43,10 @@ class GeneralModel():
     estimator : torch.nn.Module or None
         Trained conditional density estimator; ``None`` until :meth:`fit`
         or :meth:`load_checkpoint` is called.
-    mcmc : MCMCSettings
+    mcmc : dict
         The sampler settings.
+    num_samples : int
+        Total number of posterior samples drawn by :meth:`sample_nle_posterior`.
 
     Raises
     ------
@@ -48,14 +56,16 @@ class GeneralModel():
 
     def __init__(self,
             prior,
-            mcmc_settings,
+            mcmc: Mapping[str, Any],
+            num_samples: int,
             density_estimator="maf",
     ):
         self.prior = prior
         if self.prior.loc.dtype != torch.float32:
             raise TypeError("Mismatch in data type. SBI requires a float32 prior")
         self.trainer = NLE_A(self.prior,density_estimator=density_estimator)
-        self.mcmc = mcmc_settings
+        self.mcmc = dict(mcmc)
+        self.num_samples = num_samples
         self.estimator = None
         self.train_history = None
 
@@ -186,9 +196,9 @@ class GeneralModel():
 
         Notes
         -----
-        Uses :attr:`mcmc` for the number of samples, chains, thinning and
-        warm-up, with one worker per chain and chains initialised from the
-        proposal (the prior).
+        Uses :attr:`num_samples` for the number of samples and passes
+        :attr:`mcmc` through to sbi's ``sample`` (chains, thinning,
+        warm-up, initialisation), with one worker per chain.
         """
         # Pass the estimator explicitly so this also works when it was loaded
         # from a checkpoint rather than trained by ``self.trainer``.
@@ -197,9 +207,7 @@ class GeneralModel():
             sample_with="mcmc", mcmc_method=mcmc_method
         )
         return posterior.sample(
-            sample_shape=(self.mcmc.num_samples,), x=x_obs,
-            num_chains=self.mcmc.num_chains, num_workers=self.mcmc.num_chains,
-            thin=self.mcmc.thin, warmup_steps=self.mcmc.warmup_steps,
-            init_strategy="proposal",
+            sample_shape=(self.num_samples,), x=x_obs,
+            num_workers=self.mcmc["num_chains"], **self.mcmc,
         )
 

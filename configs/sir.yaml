@@ -21,9 +21,6 @@ N_sir: 1000
 T_sir: 150
 
 num_posterior_samples: 500            # Number of posterior samples
-num_chains: 1 
-warmup_steps: 500
-thin: 1
 
 beta_base_general: 1e-6           # A reasonable starting value for beta for the general case
 beta_min_general: 1e-8      # Clamping beta at a minimum value for NSM-Bayes

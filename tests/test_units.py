@@ -9,6 +9,7 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 from torch.distributions import MultivariateNormal
+from types import SimpleNamespace
 
 import nsm_bayes.models.general.posterior as general_posterior
 from nsm_bayes.inference.bootstrap import (
@@ -22,7 +23,6 @@ from nsm_bayes.inference.beta_calibration_loop import calibrate_beta
 from nsm_bayes.inference.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
-from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.simulators.benchmark_simulators import GandKSimulator,SIRSimulator
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats, chi2_ppf
@@ -241,7 +241,7 @@ def test_vector_fn_gives_jacobian_rows_and_laplacian_per_output(quadratic):
 # --------------------------------------------------------------------------- #
 TARGET_MEAN = np.array([1.0, -2.0])
 TARGET_COV = np.array([[1.0, 0.6], [0.6, 2.0]])
-SLICE_SETTINGS = MCMCSettings(num_samples=3000, num_chains=2, warmup_steps=300, thin=1)
+SLICE_SETTINGS = SimpleNamespace(num_samples=3000, num_chains=2, warmup_steps=300, thin=1)
 
 
 @pytest.fixture(scope="module")

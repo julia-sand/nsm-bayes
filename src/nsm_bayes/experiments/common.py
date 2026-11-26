@@ -16,14 +16,13 @@ from pathlib import Path
 from typing import Any, Callable, Generator
 
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from nsm_bayes.inference.beta_calibration_loop import calibrate_beta
 from nsm_bayes.models.conjugate import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.normflow import GeneralModel
 from nsm_bayes.models.general.posterior import GeneralPosterior
-from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.linalg import sigma_inverse
 
@@ -148,8 +147,9 @@ def run_normflow_methods(
     prior : torch.distributions.MultivariateNormal
         Prior over ``theta`` (``float32``, as sbi requires).
     cfg : omegaconf.DictConfig
-        Experiment configuration. Reads ``num_posterior_samples``,
-        ``num_chains``, ``warmup_steps``, ``thin``, ``robust_flag``,
+        Experiment configuration. Reads ``num_posterior_samples`` and the
+        ``mcmc`` block (``num_chains``, ``warmup_steps``, ``thin``,
+        ``init_strategy``), ``robust_flag``,
         ``beta_base_general``, ``alpha``, ``B``, ``T`` and, optionally,
         ``density_estimator`` (default ``"maf"``), ``beta_min_general``
         (default ``0.01``) and ``calibration_method`` (default
@@ -191,11 +191,11 @@ def run_normflow_methods(
     """
     x_obs_mis = data.x_obs_mis
 
-
     #set mcmc config
-    mcmc = MCMCSettings.from_cfg(cfg)
+    mcmc = OmegaConf.to_container(cfg.mcmc, resolve=True)
+    num_samples = int(cfg.num_posterior_samples)
 
-    flow_model = GeneralModel(prior, mcmc_settings=mcmc, density_estimator=cfg.get("density_estimator", "maf"))
+    flow_model = GeneralModel(prior, mcmc, num_samples, density_estimator=cfg.get("density_estimator", "maf"))
 
     #train the surrogate model, or reuse a trained checkpoint from save_dir
     ckpt_path = save_dir / f"likelihood_estimator_full_{rep}.pt"
@@ -221,7 +221,7 @@ def run_normflow_methods(
     #estimate the robust statistics
     #set up a posterior for calibration
     beta_posterior = GeneralPosterior(flow_model=flow_model, x_obs=x_obs_mis, prior=prior,
-                                mcmc=mcmc, robust=cfg.robust_flag)
+                                mcmc=mcmc, num_samples=num_samples, robust=cfg.robust_flag)
     
     #calibrate beta / temperature
     with timed(save_dir, "sm_mcmc", rep):

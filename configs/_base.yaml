@@ -1,5 +1,12 @@
-  hydra:
-    job_logging:
-      formatters:
-        simple:
-          format: "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+hydra:
+  job_logging:
+    formatters:
+      simple:
+        format: "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+
+num_posterior_samples: 500   # total posterior draws
+mcmc:                        # sampler settings; later passed as **kwargs to sbi
+  num_chains: 1
+  warmup_steps: 500
+  thin: 1
+  init_strategy: proposal    # chains start from prior draws

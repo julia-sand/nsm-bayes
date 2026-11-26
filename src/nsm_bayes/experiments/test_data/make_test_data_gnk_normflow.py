@@ -27,10 +27,12 @@ mode.  ``GeneralModel.load_checkpoint`` does
 module, loaded the way the notebook loads it::
 
     bundle  = torch.load(".../test_gnk_normflow.pkl", weights_only=False)
-    model   = GeneralModel(bundle["prior"], MCMCSettings()).load_checkpoint(
+    mcmc    = {"num_chains": 1, "warmup_steps": 500, "thin": 1,
+               "init_strategy": "proposal"}
+    model   = GeneralModel(bundle["prior"], mcmc, 500).load_checkpoint(
                   ".../test_gnk_normflow.pt")
     posterior = GeneralPosterior(
-        bundle["x_obs_mis"], model, bundle["prior"], MCMCSettings(),
+        bundle["x_obs_mis"], model, bundle["prior"], mcmc, 500,
         robust=False, weight_type="imq", c=1.0,
     )
 
@@ -49,6 +51,7 @@ Run from the repo root (with the package installed, e.g. ``pip install -e .``)::
 from pathlib import Path
 
 import torch
+from omegaconf import OmegaConf
 
 from nsm_bayes.experiments import gnk as gnk_exp
 from nsm_bayes.experiments.test_data.common import (
@@ -60,7 +63,6 @@ from nsm_bayes.experiments.test_data.common import (
     save_bundle,
 )
 from nsm_bayes.models.general import GeneralModel
-from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 
 # One repetition per bundle (seed = seed_offset + rep).
 GNK_REP = 0
@@ -83,7 +85,9 @@ def make_gnk_normflow_bundle(force: bool = False) -> Path:
     _, prior, theta_true, d_x, seed, data = generate_experiment_data(
         gnk_exp, cfg, GNK_REP)
 
-    model = GeneralModel(prior, MCMCSettings(), density_estimator="maf")
+    mcmc = OmegaConf.to_container(cfg.mcmc, resolve=True)
+    num_samples = int(cfg.num_posterior_samples)
+    model = GeneralModel(prior, mcmc, num_samples, density_estimator="maf")
     model.fit(x_sim=data.x_sim, theta_sim=data.theta)
     
     # Save the trained estimator module itself (not a state dict):
@@ -99,7 +103,7 @@ def make_gnk_normflow_bundle(force: bool = False) -> Path:
             "hidden_dim", "robust_flag", "weight_function", "imq_c",
             "beta_base_general", "calibration_method", "beta_min_general",
             "alpha", "B", "T", "n_obs",
-            "num_posterior_samples", "num_chains", "warmup_steps", "thin",
+            "num_posterior_samples", "mcmc",
         ],
     )
     save_bundle(out_path, bundle)
