@@ -23,8 +23,7 @@ from nsm_bayes.inference.slice_sampler import run_multivariate_slice_sampler_tun
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
 from nsm_bayes.models.general.mcmc_settings import MCMCSettings
-from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
-from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
+from nsm_bayes.simulators.benchmark_simulators import GandKSimulator,SIRSimulator
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats, chi2_ppf
 

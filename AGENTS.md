@@ -40,7 +40,7 @@ src/nsm_bayes/
   inference/beta_calibration_loop.py  calibrate_beta (gpc/bisect/grid dispatch)
   inference/beta_update_rules.py      SA step, log-bisection, grid search
   inference/beta_bo_calibration.py    BoTorch GP beta calibration
-  simulators/                benchmark_simulators/ (gandk, sir, turin, shared helpers),
+  simulators/                benchmark_simulators/ (gandk, sir, turin),
                              add_noise.py (contamination), fromdata.py (pkl loader + Gaussian MLE)
   utils/                     linalg (sigma_inverse, safe_cholesky, jacobians),
                              statistics (robust/sample moments), weights (imq/huber/none),

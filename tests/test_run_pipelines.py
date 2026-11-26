@@ -107,7 +107,7 @@ def test_gnk_observed_data(gnk_cfg):
 
 def test_gnk_simulate_shapes():
     """``simulate`` accepts 1D and 2D theta and returns the expected shapes."""
-    from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
+    from nsm_bayes.simulators.benchmark_simulators import GandKSimulator
 
     sim = GandKSimulator()
     theta = sim.prior.sample((5,))
@@ -155,7 +155,7 @@ def test_sir_uc_undercounting_is_one_sided(sir_uc_cfg):
 
 def test_turin_generate_training_data_shapes():
     """Training data from the prior has the expected shapes."""
-    from nsm_bayes.simulators.benchmark_simulators.simulators import TurinSimulator
+    from nsm_bayes.simulators.benchmark_simulators import TurinSimulator
 
     sim = TurinSimulator(N=6, Ns=33, device="cpu")
     theta, x_sim = sim.generate_training_data(6)

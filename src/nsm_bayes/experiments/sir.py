@@ -9,7 +9,7 @@ import torch
 from omegaconf import DictConfig
 
 from nsm_bayes.experiments.common import ExperimentData
-from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
+from nsm_bayes.simulators.benchmark_simulators import SIRSimulator
 
 __all__ = ["build_problem", "generate_data"]
 
@@ -70,7 +70,7 @@ def generate_data(
 
     Parameters
     ----------
-    sim : nsm_bayes.simulators.benchmark_simulators.sir.SIRSimulator
+    sim : nsm_bayes.simulators.benchmark_simulators.SIRSimulator
         The simulator returned by :func:`build_problem`.
     theta_true : torch.Tensor
         True parameter vector in unconstrained space (shape ``(4,)``).
