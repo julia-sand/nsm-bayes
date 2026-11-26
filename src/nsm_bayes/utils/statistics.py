@@ -2,8 +2,42 @@
 import numpy as np
 import torch
 from sklearn.covariance import MinCovDet
+from torch.distributions import Chi2
 
 from nsm_bayes.utils.linalg import sigma_inverse
+
+
+def chi2_ppf(q: float, df: int) -> float:
+    """Inverse CDF (quantile) of the chi-square distribution.
+
+    Bisection on :class:`torch.distributions.Chi2`'s CDF (which torch
+    provides without an inverse CDF), run in float64.
+
+    Parameters
+    ----------
+    q : float
+        Probability in ``(0, 1)``.
+    df : int
+        Degrees of freedom, must be positive.
+
+    Returns
+    -------
+    float
+        Value ``x`` with ``P(X <= x) = q`` for ``X ~ chi2(df)``.
+    """
+    dist = Chi2(torch.tensor(float(df), dtype=torch.float64))
+    lo, hi = torch.tensor(0.0, dtype=torch.float64), \
+        torch.tensor(float(df), dtype=torch.float64)
+    while dist.cdf(hi) < q:
+        hi = hi * 2.0
+    for _ in range(64):
+        mid = 0.5 * (lo + hi)
+        if dist.cdf(mid) < q:
+            lo = mid
+        else:
+            hi = mid
+    return float(0.5 * (lo + hi))
+
 
 # functions for getting statistics of observed data
 

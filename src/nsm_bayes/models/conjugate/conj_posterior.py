@@ -31,7 +31,6 @@ All of this is computed in the standardised ``x`` and ``theta`` spaces of
 the model and mapped back to original units.
 """
 import torch
-from scipy.stats import chi2
 from torch import Tensor
 from torch.func import vmap
 
@@ -43,7 +42,7 @@ from nsm_bayes.utils.linalg import (
 )
 
 from nsm_bayes.utils.weights import weight_function
-from nsm_bayes.utils.statistics import estimate_stats, mahalanobis_sq
+from nsm_bayes.utils.statistics import chi2_ppf, estimate_stats, mahalanobis_sq
 
 class ConjugatePosterior():
     """Gaussian generalised posterior for a fitted :class:`EnergyBasedModel`.
@@ -496,7 +495,8 @@ class ConjugatePosterior():
                 "prepare_calibration to be called first"
             )
 
-        chi2_critical_value = chi2.ppf(1.0 - self.alpha, df=self.prior_mean.shape[0])
+        chi2_critical_value = chi2_ppf(1.0 - self.alpha,
+                                       self.prior_mean.shape[0])
 
         covered = 0
         for _ in range(self.B):

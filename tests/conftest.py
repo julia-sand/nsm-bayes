@@ -10,7 +10,7 @@ Two heavy components are shrunk so a "fast" full run stays in the
 tens-of-seconds range:
 
 * the normalising-flow likelihood trainer (``nsm_bayes.models.general.
-  normflow.SNLE``) is replaced by a lightweight :class:`_StubNLE`, and
+  normflow.NLE_A``) is replaced by a lightweight :class:`_StubNLE`, and
 * the score-matching trainer's epoch budget is capped via
   ``monkeypatch.setattr`` on ``train_q_phi``'s defaults (the model passes
   only the required args, so the defaults are what get used).
@@ -101,7 +101,7 @@ def sir_uc_cfg():
 # Heavy-component stand-ins (monkeypatched inside the autouse fixture)         #
 # --------------------------------------------------------------------------- #
 class _StubNLE:
-    """A cheap Gaussian stand-in for an sbi ``SNLE`` likelihood estimator.
+    """A cheap Gaussian stand-in for an sbi ``NLE_A`` likelihood estimator.
 
     It exposes exactly the surface the scripts use:
     ``log_prob(theta, condition)``, ``parameters()`` and
@@ -199,7 +199,7 @@ def _fast_runs(monkeypatch):
     import nsm_bayes.models.general.normflow as normflow
 
     # 1) Replace the normalising-flow trainer with the Gaussian stand-in.
-    monkeypatch.setattr(normflow, "SNLE", _StubNLE)
+    monkeypatch.setattr(normflow, "NLE_A", _StubNLE)
 
     # 2) Cap the score-matching training budget. EnergyBasedModel.fit calls
     #    train_q_phi with only the required args, so patching it in its own

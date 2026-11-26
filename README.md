@@ -9,7 +9,7 @@ experimental scripts for a misspecified (contaminated) observation model.
 The project runs two inference methods on four benchmark simulators
 (`gnk`, `sir`, `sir_undercounting`, `turin`):
 
-- **normflow** ("general"): trains an sbi `SNLE` normalising flow as a
+- **normflow** ("general"): trains an sbi `NLE_A` normalising flow as a
   likelihood surrogate, builds the generalised posterior
   `π(θ)·exp(-β·n·L_NSM(θ; x))` and samples it with a slice sampler.
 - **conjugate** ("case 1"): trains a neural exponential family
@@ -148,5 +148,4 @@ Core dependencies are declared in `pyproject.toml`, including:
 - `numpy` (`<2`)
 - `scikit-learn`
 - `sbi` (`>=0.27,<0.28`)
-- `scipy`
 - `torch`

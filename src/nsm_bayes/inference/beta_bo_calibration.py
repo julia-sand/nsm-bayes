@@ -16,7 +16,7 @@ __all__ = [
     "fit_gp",
     "find_target_beta",
     "optimize_beta_bisection",
-    "optimize_beta_ei",
+    "optimize_beta_bo",
 ]
 
 
@@ -173,13 +173,16 @@ def optimize_beta_bo(
     :func:`optimize_beta_bisection` with its own defaults for
     ``target_coverage`` and ``beta_min`` (they are not forwarded).
     """
-    train_x, train_y = _training_tensors(betas, coverages)
 
     if posterior is None:
-        return optimize_beta_bisection(betas,coverages)
+        return optimize_beta_bisection(betas,coverages,
+                        target_coverage=target_coverage,
+                        beta_min=beta_min,)
 
     if n_iter < 0:
         raise ValueError("n_iter must be nonnegative.")
+
+    train_x, train_y = _training_tensors(betas, coverages)
 
     # Use the observed beta range as the finite acquisition domain.
     upper = train_x.max().item()
@@ -222,18 +225,19 @@ def optimize_beta_bo(
         )
 
         next_beta = candidate[0, 0].item()
+        coverage = posterior.estimate_coverage(beta=next_beta)[0]
 
-        next_coverage = float(
-            posterior.estimate_coverage(
-                beta=next_beta,
-            )[0]
-        )
-        new_y = train_y.new_tensor([[next_coverage]])
+        new_y = torch.as_tensor(
+            coverage,
+            dtype=train_y.dtype,
+            device=train_y.device,
+        ).detach().reshape(1, 1)
 
         if not torch.isfinite(new_y).all().item():
             raise ValueError(
                 f"Coverage evaluation at beta={next_beta} must be finite."
             )
+
 
         train_x = torch.cat(
             [train_x, candidate.detach()], dim=0

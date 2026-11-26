@@ -26,7 +26,7 @@ from nsm_bayes.models.general.mcmc_settings import MCMCSettings
 from nsm_bayes.simulators.benchmark_simulators.sir import SIRSimulator
 from nsm_bayes.simulators.benchmark_simulators.simulators import GandKSimulator
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
-from nsm_bayes.utils.statistics import estimate_stats
+from nsm_bayes.utils.statistics import estimate_stats, chi2_ppf
 
 
 # --------------------------------------------------------------------------- #
@@ -350,10 +350,9 @@ class _FixedConjugatePosterior:
             self.x_obs = x_obs
 
     def estimate_coverage(self, beta, ess_threshold=0.3):
-        from scipy.stats import chi2
         d = len(self.prior_mean)
         n_obs = self.x_obs.shape[0]
-        crit = chi2.ppf(1.0 - self.alpha, df=d)
+        crit = chi2_ppf(1.0 - self.alpha, d)
         covered = 0
         for _ in range(self.B):
             indices = torch.randint(0, n_obs, (n_obs,), device=self.x_obs.device)
@@ -972,17 +971,18 @@ def test_optimize_beta_bo_rejects_bad_inputs():
 
     # Mismatched lengths
     with pytest.raises(ValueError, match="equal lengths"):
-        optimize_beta_bo([0.1, 0.2], [0.9], n_iter=0, evaluate_fn=lambda b: 0.0)
+        optimize_beta_bo([0.1, 0.2], [0.9])
 
-    # Initial betas must lie within [beta_min, beta_max]
-    with pytest.raises(ValueError, match="search bounds"):
-        optimize_beta_bo([0.1, -0.2], [0.9, 0.8], n_iter=0, evaluate_fn=lambda b: 0.0)
+    # beta_min must be smaller than the largest supplied beta (posterior path)
+    with pytest.raises(ValueError, match="beta_min"):
+        optimize_beta_bo([0.1, 0.2], [0.9, 0.8], beta_min=0.5,
+                         posterior=object(), n_iter=0)
 
-    # Betas below beta_min are rejected too
-    with pytest.raises(ValueError, match="search bounds"):
+    # Betas at or below beta_min are rejected too
+    with pytest.raises(ValueError, match="beta_min"):
         optimize_beta_bo([0.001, 0.002, 0.005, 0.01], [0.9, 0.93, 0.97, 0.99],
                          target_coverage=0.95, beta_min=0.01,
-                         n_iter=0, evaluate_fn=lambda b: 0.0)
+                         posterior=object(), n_iter=0)
 
 
 def test_optimize_beta_bo_recovers_crossing_beta():
@@ -995,23 +995,23 @@ def test_optimize_beta_bo_recovers_crossing_beta():
     coverages = np.array([0.8 + 0.5 * b for b in betas])
 
     beta, cov = optimize_beta_bo(betas, coverages, target_coverage=0.95,
-                                 n_iter=0, evaluate_fn=lambda b: 0.0)
+                                 posterior=object(), n_iter=0)
     assert np.isfinite(beta) and beta > 0
     assert beta == pytest.approx(0.3)
+    assert cov == pytest.approx(0.95)
 
 
 def test_optimize_beta_bo_fallback_when_no_crossing():
-    """If coverage never reaches the target, return the closest point."""
+    """Without a posterior, GP bisection raises if the predicted coverage
+    never reaches the target, instead of guessing a point."""
     from nsm_bayes.inference.beta_bo_calibration import optimize_beta_bo
 
-    # coverage is always well below target 0.99
+    # coverage is always well below target 0.95
     betas = np.array([0.01, 0.02, 0.05, 0.1], dtype=float)
     coverages = np.array([0.50, 0.55, 0.70, 0.80])
 
-    beta, _ = optimize_beta_bo(betas, coverages, target_coverage=0.99,
-                               n_iter=0, evaluate_fn=lambda b: 0.0)
-    # Should be the grid point with the largest coverage (0.1)
-    assert beta == pytest.approx(0.1)
+    with pytest.raises(ValueError, match="bracket"):
+        optimize_beta_bo(betas, coverages, target_coverage=0.95)
 
 
 def test_optimize_beta_bo_result_deterministic():
@@ -1023,8 +1023,19 @@ def test_optimize_beta_bo_result_deterministic():
 
     results = set()
     for _ in range(3):
-        beta, _ = optimize_beta_bo(betas, coverages, target_coverage=0.95,
-                                   n_iter=0, evaluate_fn=lambda b: 0.0)
+        beta, _ = optimize_beta_bo(betas, coverages, target_coverage=0.95)
         results.add(float(beta))
     assert len(results) == 1  # fully deterministic
 
+
+
+@pytest.mark.parametrize("df, crit", [
+    (1, 3.841459),
+    (2, 5.991465),
+    (3, 7.814728),
+    (10, 18.307038),
+])
+def test_chi2_ppf_matches_tabulated_quantiles(df, crit):
+    """The torch bisection inverse CDF recovers the tabulated 95%
+    chi-square critical values."""
+    assert chi2_ppf(0.95, df) == pytest.approx(crit, abs=1e-5)

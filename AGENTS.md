@@ -1,7 +1,7 @@
 # AGENTS.md — nsm-bayes
 
 Guidance for AI coding agents (and humans) working in this repository.
-Written against commit `3e2ccc5` (2026-10-26). If the code and this file
+Written against commit `d14d1af` (2026-11-25). If the code and this file
 disagree, trust the code and update this file.
 
 ## What this project is
@@ -13,8 +13,8 @@ model:
 
 | Method | Where | Idea |
 |---|---|---|
-| **normflow** ("general") | `models/general/`, `inference/general/` | Train an sbi `SNLE` flow (`maf`/`mdn`) as likelihood surrogate; build a generalised posterior `π(θ)·exp(-β·n·L_NSM(θ; x))`; sample it with a slice sampler. |
-| **conjugate** ("case 1") | `models/conjugate/`, `inference/conjugate/` | Train a neural exponential family (`T_phi`, `b_phi`) by score matching; the generalised posterior is Gaussian in closed form. |
+| **normflow** ("general") | `models/general/` (+ shared `inference/`) | Train an sbi `NLE_A` flow (`maf`/`mdn`) as likelihood surrogate; build a generalised posterior `π(θ)·exp(-β·n·L_NSM(θ; x))`; sample it with a slice sampler. |
+| **conjugate** ("case 1") | `models/conjugate/` (+ shared `inference/`) | Train a neural exponential family (`T_phi`, `b_phi`) by score matching; the generalised posterior is Gaussian in closed form. |
 
 Both calibrate the learning rate / temperature **β** by bootstrap coverage
 matching (general posterior calibration, Syring & Martin), so the
@@ -32,13 +32,16 @@ scripts/{normflow,conjugate}/run_<exp>.py   thin Hydra entry points (8 total)
 src/nsm_bayes/
   experiments/common.py      ExperimentData, run_experiment, the two method steps, save/timed
   experiments/<exp>.py       build_problem(cfg) + generate_data(...) per experiment
-  models/general/            GeneralModel (SNLE wrapper), GeneralPosterior, MCMCSettings
+  experiments/test_data/     capped data bundles + checkpoints for the examples/ notebooks
+  models/general/            GeneralModel (NLE_A wrapper), GeneralPosterior, MCMCSettings
   models/conjugate/          EnergyBasedModel, TphiNet/BphiNet, train_q_phi, ConjugatePosterior
   inference/bootstrap.py     bootstrap counts, importance reweighting, coverage indicator
-  inference/general/         calibrate_beta (reweighting-based), slice sampler
-  inference/conjugate/       calibrate_beta_gpc (closed-form posterior per bootstrap)
-  simulators/                benchmark simulators, contamination helpers
-                             (add_noise.py), fromdata.py (pkl loader + Gaussian MLE)
+  inference/slice_sampler.py multivariate random-direction slice sampler (general method)
+  inference/beta_calibration_loop.py  calibrate_beta (gpc/bisect/grid dispatch)
+  inference/beta_update_rules.py      SA step, log-bisection, grid search
+  inference/beta_bo_calibration.py    BoTorch GP beta calibration
+  simulators/                benchmark_simulators/ (gandk, sir, turin, shared helpers),
+                             add_noise.py (contamination), fromdata.py (pkl loader + Gaussian MLE)
   utils/                     linalg (sigma_inverse, safe_cholesky, jacobians),
                              statistics (robust/sample moments), weights (imq/huber/none),
                              misc (set_seed)
@@ -48,10 +51,9 @@ examples/                    notebooks (may lag the package API)
 ```
 
 Note: the **Unreleased** section of the CHANGELOG still mentions
-`nsm_bayes.gpc`, `nsm_bayes.method`, `nsm_bayes.posterior`,
-`nsm_bayes.slice_sampler` and `nsm_bayes.utils.utils`. **None of these
-modules exist any more** — those entries describe an earlier layout and need
-a cleanup pass. Use the paths above.
+`nsm_bayes.method`, `nsm_bayes.posterior`, `nsm_bayes.slice_sampler` and
+`nsm_bayes.utils.utils`. **None of these modules exist any more** — those
+entries describe an earlier layout; read them against the paths above.
 
 ## Setup and commands
 
@@ -176,7 +178,7 @@ change and must go in the CHANGELOG.
   (`conftest._tiny_base`: `num_repeat=1`, small `num_samples`, `T=2`, `B=6`,
   …) and a `tmp_path` save dir — no Hydra app, nothing written to `data/`.
 - Heavy components are stubbed by the autouse `_fast_runs` fixture:
-  `normflow.SNLE` → `_StubNLE`, and `train_q_phi` capped to 2 epochs.
+  `normflow.NLE_A` → `_StubNLE`, and `train_q_phi` capped to 2 epochs.
   **When you change how library code calls the flow** (method names, kwargs
   like `condition=`), update `_StubNLE` to match the real sbi surface.
 - Tests assert structure and sanity, not exact numbers: shapes, finiteness,
