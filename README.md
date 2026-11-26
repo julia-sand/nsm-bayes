@@ -79,8 +79,8 @@ matching, so the `1-α` credible region has `1-α` frequentist coverage.
 
 ## Installation
 
-Requires Python 3.10–3.12 (numpy is pinned `<2`; on 3.13 `nflows`/`antlr`
-fail to build).
+Requires Python 3.10–3.12 (on 3.13 `nflows`/`antlr` fail to build; the
+dependency stack is numpy-2 compatible, so no numpy upper bound is set).
 
 ```bash
 python -m pip install -e .
@@ -145,7 +145,7 @@ Core dependencies are declared in `pyproject.toml`, including:
 - `botorch` (pulls in `gpytorch`, imported directly by `inference/beta_bo_calibration.py`)
 - `hydra-core` / `omegaconf`
 - `matplotlib`
-- `numpy` (`<2`)
+- `numpy` (`>=1.26.4`)
 - `scikit-learn`
 - `sbi` (`>=0.27,<0.28`)
 - `torch`

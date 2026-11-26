@@ -58,8 +58,9 @@ entries describe an earlier layout; read them against the paths above.
 ## Setup and commands
 
 ```bash
-# Python 3.10–3.12. numpy is pinned <2; on 3.13 nflows/antlr fail to build.
-# sbi is pinned >=0.23,<0.28: the code targets sbi 0.27 log_prob semantics.
+# Python 3.10–3.12 (on 3.13 nflows/antlr fail to build); numpy is >=1.26.4
+# with no upper bound (the stack is numpy-2 compatible).
+# sbi is pinned >=0.27,<0.28: the code targets sbi 0.27 log_prob semantics.
 python -m venv .venv && source .venv/bin/activate
 python -m pip install -e . pytest
 
