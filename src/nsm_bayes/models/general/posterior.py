@@ -65,6 +65,13 @@ class GeneralPosterior:
         Weight function; see :func:`~nsm_bayes.utils.weights.weight_function`.
     c : float, default 1.0
         Scale parameter of the weight function.
+    theta_chunk_size : int, optional
+        Maximum number of rows (parameter values) passed to one vmapped
+        loss evaluation in :meth:`_losses_batch`, which also bounds the
+        peak memory of :meth:`per_x_losses` and :meth:`_potential`.
+        ``None`` (default) evaluates the whole batch at once; a positive
+        integer splits the batch with ``torch.split`` and concatenates the
+        per-chunk results.
 
     Attributes
     ----------
@@ -108,7 +115,8 @@ class GeneralPosterior:
                     num_samples: int,
                     robust: bool = True,
                     weight_type: str = "imq",
-                    c: float = 1.0):
+                    c: float = 1.0,
+                    theta_chunk_size: int | None = None):
 
         self.flow = flow_model
         self.x_obs = x_obs
@@ -116,6 +124,7 @@ class GeneralPosterior:
         self.mcmc = dict(mcmc)
         self.num_samples = num_samples
         self.robust, self.weight_type, self.c = robust, weight_type, c
+        self.theta_chunk_size = theta_chunk_size
         self.n_obs = x_obs.shape[0]
 
         self.mu_hat, self.Sigma_inv = estimate_stats(x_obs, robust)
@@ -176,6 +185,45 @@ class GeneralPosterior:
             self.x_obs, self.w2, self.grad_w2, theta
         )
 
+    def _losses_batch(self, theta: Tensor) -> Tensor:
+        """Per-observation losses for a batch of parameter values.
+
+        Parameters
+        ----------
+        theta : torch.Tensor
+            Parameter values of shape ``(K, d_theta)``.
+
+        Returns
+        -------
+        torch.Tensor
+            Losses of shape ``(K, n)``; row ``k`` equals
+            :meth:`_losses_one_theta` of ``theta[k]`` (up to float
+            rounding of the batched reductions).
+
+        Notes
+        -----
+        One ``vmap`` over the flattened ``K * n`` (theta, x) pairs, chunked
+        by :attr:`theta_chunk_size` (``torch.split``) if set. A nested
+        ``vmap`` of :meth:`_losses_one_theta` over theta does not work with
+        the sbi flow: the inner per-observation batch dimension has no
+        counterpart in the theta-batched conditioning, so the MADE context
+        layer fails to broadcast.
+        """
+        n = self.n_obs
+        chunk = self.theta_chunk_size or theta.shape[0]
+        parts = []
+        for c in torch.split(theta, chunk, dim=0):
+            k = c.shape[0]
+            parts.append(
+                vmap(self._per_x_sm_loss, in_dims=(0, 0, 0, 0))(
+                    self.x_obs.repeat(k, 1),
+                    self.w2.repeat(k),
+                    self.grad_w2.repeat(k, 1),
+                    c.repeat_interleave(n, dim=0),
+                ).reshape(k, n)
+            )
+        return torch.cat(parts, dim=0)
+
     def sm_loss(self, theta):
         """Mean score-matching loss ``L_NSM(theta)`` over the observations.
 
@@ -209,13 +257,12 @@ class GeneralPosterior:
 
         Notes
         -----
-        Loops over parameter samples and vectorises over observations.
+        Batched over parameter samples with :meth:`_losses_batch` (one
+        ``vmap`` over the flattened ``M * n`` (theta, x) pairs, chunked by
+        :attr:`theta_chunk_size`).
         """
 
-        ell = torch.stack(
-            [self._losses_one_theta(th) for th in theta_samples],
-            dim=0,
-        )
+        ell = self._losses_batch(theta_samples)
         return ell, ell.mean(dim=1)
 
 
@@ -265,12 +312,36 @@ class GeneralPosterior:
         Returns
         -------
         torch.Tensor
-            Unnormalised log-densities of shape ``(K,)`` in `theta`'s
-            dtype; ``-inf`` where `theta` is outside the prior support.
+            Unnormalised log-densities of shape ``(K,)`` in the input
+            ``theta`` dtype; ``-inf`` where `theta` is outside the prior
+            support.
+
+        Notes
+        -----
+        The prior log-density is evaluated for the whole batch (per-dimension
+        priors, whose ``log_prob`` returns ``(K, d_theta)``, are summed over
+        the last dimension, matching the single-theta ``.sum()`` of
+        :meth:`posterior_log_prob`). The SM loss is evaluated with
+        :meth:`_losses_batch` **only for the in-support rows**: out-of-support
+        ``theta`` may yield NaN/inf inside the flow, and masking with
+        ``torch.where`` afterwards could still leak NaNs, so those rows are
+        filled with ``-inf`` directly. Row by row this agrees with
+        :meth:`posterior_log_prob` (up to float rounding of the batched
+        reductions).
         """
-        return torch.tensor(
-            [self.posterior_log_prob(th, beta) for th in theta], dtype=theta.dtype
+        input_dtype = theta.dtype
+        theta = theta.to(dtype=self.x_obs.dtype, device=self.x_obs.device)
+        log_prior = self.prior.log_prob(theta)
+        if log_prior.shape == theta.shape:   # per-dimension prior: (K, d_theta)
+            log_prior = log_prior.sum(dim=-1)
+        in_support = ~torch.isneginf(log_prior)
+        out = torch.full(
+            (theta.shape[0],), -np.inf, dtype=theta.dtype, device=theta.device
         )
+        if in_support.any():
+            loss = self._losses_batch(theta[in_support]).mean(dim=-1)
+            out[in_support] = log_prior[in_support] - beta * self.n_obs * loss
+        return out.to(dtype=input_dtype)
 
     def sample(self, beta: float) -> Tensor:
         """Draw samples from the generalised posterior.

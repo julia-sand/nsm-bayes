@@ -22,6 +22,7 @@ from nsm_bayes.inference.bootstrap import (
 from nsm_bayes.inference.beta_calibration_loop import calibrate_beta
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
+from nsm_bayes.models.general.normflow import GeneralModel
 from nsm_bayes.models.general.posterior import GeneralPosterior
 from nsm_bayes.simulators.benchmark_simulators import GandKSimulator,SIRSimulator
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
@@ -278,13 +279,13 @@ def _build_gaussian_posterior(num_samples: int, num_chains: int = 2,
     """GeneralPosterior on tiny data, with the conftest stub flow.
 
     The prior is bounded (a box far from the Gaussian mass, so the sampling
-    target is the Gaussian itself) so the ``-inf`` branch of
-    :meth:`GeneralPosterior._potential` is exercisable. The flow is the
-    conftest ``_StubNLE`` stand-in and is never evaluated: the tests
-    monkeypatch ``posterior_log_prob``, so only the flow's attributes matter
-    (and ``sample`` does not touch it at all). ``_StubNLE`` is used directly
-    rather than through :class:`GeneralModel` because the latter demands a
-    ``prior.loc``, which the bounded test prior does not have.
+    target is the Gaussian itself). The flow is the conftest ``_StubNLE``
+    stand-in and is never evaluated: the tests monkeypatch ``_potential``
+    (the batched function sbi's sampler actually calls), so only the flow's
+    attributes matter (and ``sample`` does not touch it at all).
+    ``_StubNLE`` is used directly rather than through :class:`GeneralModel`
+    because the latter demands a ``prior.loc``, which the bounded test prior
+    does not have.
     """
     from tests.conftest import _StubNLE
 
@@ -298,10 +299,23 @@ def _build_gaussian_posterior(num_samples: int, num_chains: int = 2,
                             mcmc=mcmc, num_samples=num_samples, robust=False)
 
 
+def _batched_gaussian_potential(prior, theta, x_o, *, beta):
+    """Batched stand-in for ``GeneralPosterior._potential``.
+
+    Applies the single-row stand-in :func:`_gaussian_log_posterior` to each
+    chain state, preserving the contract sbi's slice sampler relies on:
+    shape ``(K,)`` in the input dtype, ``-inf`` outside the prior support.
+    """
+    return torch.tensor(
+        [_gaussian_log_posterior(prior, th, beta) for th in theta],
+        dtype=theta.dtype,
+    )
+
+
 def _patch_log_prob(monkeypatch, post: GeneralPosterior) -> None:
-    """Point ``post.posterior_log_prob`` at the known Gaussian stand-in."""
-    monkeypatch.setattr(post, "posterior_log_prob",
-                        partial(_gaussian_log_posterior, post.prior))
+    """Point ``post._potential`` at the known Gaussian stand-in (batched)."""
+    monkeypatch.setattr(post, "_potential",
+                        partial(_batched_gaussian_potential, post.prior))
 
 
 @pytest.mark.parametrize("num_chains", [1, 2])
@@ -326,14 +340,102 @@ def test_general_posterior_sample_recovers_gaussian(monkeypatch):
     assert torch.allclose(torch.cov(s.T.double(), correction=0), SM_TARGET_COV, atol=0.25)
 
 
-def test_general_posterior_potential_is_minus_inf_outside_prior_support(monkeypatch):
-    """The test prior is bounded: _potential returns -inf (no error) outside."""
-    post = _build_gaussian_posterior(num_samples=32, warmup_steps=8)
-    _patch_log_prob(monkeypatch, post)
-    theta = torch.tensor([[100.0, 0.0], [1.0, -2.0]], dtype=torch.float32)
-    v = post._potential(theta, post.x_obs, beta=1.0)
-    assert v.shape == (2,)
-    assert torch.isneginf(v[0]) and torch.isfinite(v[1])
+# --------------------------------------------------------------------------- #
+# 10b. Batched losses / potential on a real (non-stub) flow                    #
+# --------------------------------------------------------------------------- #
+class _BoxUniform(Uniform):
+    """Bounded box prior with the ``loc`` (centre) attribute GeneralModel checks."""
+
+    @property
+    def loc(self):
+        return (self.low + self.high) / 2
+
+
+@pytest.fixture(scope="module")
+def real_sm_posterior():
+    """GeneralPosterior with a real trained MAF flow, bypassing the conftest stub.
+
+    The autouse ``_fast_runs`` fixture replaces ``normflow.NLE_A`` with the
+    Gaussian ``_StubNLE`` for every test, so the real sbi trainer is injected
+    explicitly. The prior is a bounded box so the out-of-support (``-inf``)
+    branch of :meth:`GeneralPosterior._potential` is exercisable.
+    """
+    from sbi.inference import NLE_A  # real trainer, not the conftest stand-in
+
+    torch.manual_seed(3)
+    d_theta = 4
+    prior = _BoxUniform(torch.full((d_theta,), -2.0), torch.full((d_theta,), 2.0))
+    theta_sim = prior.sample((400,))
+    x_sim = torch.sin(theta_sim[:, :1]) + 0.1 * torch.randn(400, 1)
+    model = GeneralModel(prior, {"num_chains": 1, "warmup_steps": 4, "thin": 1,
+                                 "init_strategy": "proposal"}, num_samples=8)
+    model.trainer = NLE_A(prior, density_estimator="maf", show_progress_bars=False)
+    model.fit(theta_sim, x_sim)
+    x_obs = torch.randn(20, 1)
+    return GeneralPosterior(x_obs=x_obs, flow_model=model, prior=prior,
+                            mcmc=model.mcmc, num_samples=8, robust=False)
+
+
+def test_losses_batch_matches_per_theta_loop(real_sm_posterior):
+    """_losses_batch (one vmap over flattened (theta, x) pairs) == the
+    stacked per-row _losses_one_theta."""
+    post = real_sm_posterior
+    theta = post.prior.sample((4,))
+    ref = torch.stack([post._losses_one_theta(t) for t in theta])
+    out = post._losses_batch(theta)
+    assert out.shape == ref.shape == (4, post.n_obs)
+    assert torch.allclose(out, ref, rtol=1e-5, atol=1e-4)
+
+
+def test_potential_batched_matches_single_theta(real_sm_posterior):
+    """Mixed in/out-of-support batch: -inf exactly on the out-of-support rows,
+    and agreement with the single-theta posterior_log_prob elsewhere."""
+    post = real_sm_posterior
+    theta = torch.tensor([
+        [1.0, 0.0, -1.0, 0.5],    # in support
+        [5.0, 0.0, 0.0, 0.0],     # outside the box [-2, 2]^4
+        [0.3, -0.7, 0.2, 1.1],    # in support
+        [0.0, 0.0, 0.0, 9.0],     # outside
+    ], dtype=torch.float32)
+    beta = 1.3
+    v = post._potential(theta, post.x_obs, beta=beta)
+    assert v.shape == (4,) and v.dtype == theta.dtype
+    assert torch.isneginf(v[1]) and torch.isneginf(v[3])
+    for k in (0, 2):
+        single = torch.tensor(post.posterior_log_prob(theta[k].numpy(), beta),
+                              dtype=v.dtype)
+        assert torch.allclose(v[k], single, rtol=1e-4, atol=1e-4)
+    # All out-of-support: no flow evaluation, no NaN leakage.
+    v_out = post._potential(theta[1::2], post.x_obs, beta=beta)
+    assert torch.isneginf(v_out).all()
+
+
+def test_potential_chunked_matches_unchunked(real_sm_posterior):
+    """theta_chunk_size=1 (torch.split into single rows) gives the same
+    losses and per_x_losses as the default (all at once)."""
+    post = real_sm_posterior
+    chunked = GeneralPosterior(x_obs=post.x_obs, flow_model=post.flow,
+                               prior=post.prior, mcmc=post.mcmc,
+                               num_samples=post.num_samples, robust=False,
+                               theta_chunk_size=1)
+    theta = post.prior.sample((5,))
+    assert torch.allclose(post._losses_batch(theta), chunked._losses_batch(theta),
+                          rtol=1e-5, atol=1e-4)
+    ell, L = post.per_x_losses(theta)
+    ell_c, L_c = chunked.per_x_losses(theta)
+    assert torch.allclose(ell, ell_c, rtol=1e-5, atol=1e-4)
+    assert torch.allclose(L, L_c, rtol=1e-5, atol=1e-4)
+
+
+def test_per_x_losses_matches_loop_reference(real_sm_posterior):
+    """per_x_losses (batched) == the per-row loop of _losses_one_theta."""
+    post = real_sm_posterior
+    theta = post.prior.sample((3,))
+    ell, L = post.per_x_losses(theta)
+    ref = torch.stack([post._losses_one_theta(t) for t in theta])
+    assert ell.shape == (3, post.n_obs) and L.shape == (3,)
+    assert torch.allclose(ell, ref, rtol=1e-5, atol=1e-4)
+    assert torch.allclose(L, ref.mean(dim=1), rtol=1e-5, atol=1e-4)
 
 
 # --------------------------------------------------------------------------- #
