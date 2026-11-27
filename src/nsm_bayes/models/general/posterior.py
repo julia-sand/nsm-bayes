@@ -20,11 +20,11 @@ score-matching loss of the trained flow :math:`q(x \mid \theta)`,
 import functools
 import logging
 from collections.abc import Mapping
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
 import torch
+from sbi.inference import MCMCPosterior
 from torch import Tensor
 from torch.func import vmap
 
@@ -33,7 +33,6 @@ from nsm_bayes.inference.bootstrap import (
     multinomial_bootstrap_counts,
     reweight_for_bootstrap_beta,
 )
-from nsm_bayes.inference.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats
 from nsm_bayes.utils.weights import weight_function
@@ -54,11 +53,11 @@ class GeneralPosterior:
     prior : torch.distributions.Distribution
         Prior over ``theta``.
     mcmc : Mapping[str, Any]
-        Slice-sampler settings for :meth:`sample`: ``num_chains``,
-        ``warmup_steps`` and ``thin``.
+        sbi MCMC settings for :meth:`sample`, passed to
+        ``sbi.inference.MCMCPosterior``: ``num_chains``, ``warmup_steps``,
+        ``thin`` and ``init_strategy``.
     num_samples : int
-        Number of samples to retain per chain (the total when
-        ``thin == 1``).
+        Total number of samples to draw, across all chains.
     robust : bool, default True
         Centre and scale the weights with the median and MCD covariance of
         `x_obs` (true) or the sample mean and covariance (false).
@@ -87,6 +86,13 @@ class GeneralPosterior:
     -----
     The weights are fitted once on the raw `x_obs`, since the flow's score
     is taken with respect to raw ``x``.
+
+    :meth:`sample` draws ``num_samples`` in *total* (sbi's
+    ``MCMCPosterior.sample`` returns exactly ``num_samples`` rows, across
+    all chains), so the calibration pool size ``M`` is
+    ``num_posterior_samples`` regardless of ``mcmc["num_chains"]``; the
+    ESS-refresh threshold ``ess_threshold * M`` therefore no longer scales
+    with the number of chains.
     """
 
     #: Only the stochastic-approximation (``gpc``) calibration strategy is
@@ -231,8 +237,9 @@ class GeneralPosterior:
 
         Notes
         -----
-        Accepts and returns NumPy/Python types so it can be passed directly
-        to the slice sampler.
+        Accepts and returns NumPy/Python types; :meth:`_potential` calls it
+        once per chain state and sbi handles the returned ``-inf`` values
+        (outside the prior support) as usual slice-sampling rejections.
         """
         theta = torch.as_tensor(theta_np, dtype=self.x_obs.dtype, device=self.x_obs.device)
         lp = self.prior.log_prob(theta).sum()
@@ -240,29 +247,37 @@ class GeneralPosterior:
             return -np.inf
         return float(lp - beta * self.n_obs * self.sm_loss(theta))
 
-    def _sampler_settings(self) -> SimpleNamespace:
-        """Build the settings object read by the slice sampler.
+    def _potential(self, theta: Tensor, x_o: Tensor, *, beta: float) -> Tensor:
+        """Batched log-posterior for sbi.
 
-        :func:`run_multivariate_slice_sampler_tuned` reads its settings as
-        attributes, so the plain :attr:`mcmc` dict plus :attr:`num_samples`
-        are wrapped in a namespace.
+        Parameters
+        ----------
+        theta : torch.Tensor
+            Parameter states of shape ``(K, d_theta)`` and dtype
+            ``float32``, one row per chain, from sbi.
+        x_o : torch.Tensor
+            Observed data passed through by sbi; unused (the loss uses
+            ``self.x_obs``).
+        beta : float
+            Learning rate of the generalised posterior, bound by
+            :meth:`sample` via ``functools.partial``.
 
         Returns
         -------
-        types.SimpleNamespace
-            With attributes ``num_samples`` (int), ``num_chains`` (int),
-            ``warmup_steps`` (int) and ``thin`` (int).
+        torch.Tensor
+            Unnormalised log-densities of shape ``(K,)`` in `theta`'s
+            dtype; ``-inf`` where `theta` is outside the prior support.
         """
-        mcmc = self.mcmc
-        return SimpleNamespace(
-            num_samples=self.num_samples,
-            num_chains=mcmc["num_chains"],
-            warmup_steps=mcmc["warmup_steps"],
-            thin=mcmc["thin"],
+        return torch.tensor(
+            [self.posterior_log_prob(th, beta) for th in theta], dtype=theta.dtype
         )
 
     def sample(self, beta: float) -> Tensor:
         """Draw samples from the generalised posterior.
+
+        Samples with sbi's coordinate-wise vectorised slice sampler
+        (``MCMCPosterior`` with ``method="slice_np_vectorized"``, settings
+        from :attr:`mcmc`).
 
         Parameters
         ----------
@@ -272,17 +287,19 @@ class GeneralPosterior:
         Returns
         -------
         torch.Tensor
-            Samples of shape ``(S, d_theta)`` with the dtype and device of
-            `x_obs`; see
-            :func:`~nsm_bayes.inference.general.slice_sampler.run_multivariate_slice_sampler_tuned`
-            for ``S``.
+            Samples of shape ``(num_samples, d_theta)`` with the dtype and
+            device of `x_obs`; ``num_samples`` in total, across all chains.
         """
-        samples = run_multivariate_slice_sampler_tuned(
-                            log_posterior_fn=functools.partial(self.posterior_log_prob, beta=beta),
-                            prior=self.prior,
-                            mcmcsettings=self._sampler_settings()
-                        )
-        return torch.from_numpy(samples).to(dtype=self.x_obs.dtype, device=self.x_obs.device)
+        posterior = MCMCPosterior(
+            functools.partial(self._potential, beta=beta),
+            proposal=self.prior,
+            method="slice_np_vectorized",
+            **self.mcmc,
+        )
+        samples = posterior.sample(
+            (self.num_samples,), x=self.x_obs, show_progress_bars=False
+        )
+        return samples.to(dtype=self.x_obs.dtype, device=self.x_obs.device)
 
     def compute_theta_hat_true(self, theta_init: Tensor, num_steps: int = 200, lr: float = 1e-2) -> Tensor:
         """Minimise the score-matching loss on the observed data.

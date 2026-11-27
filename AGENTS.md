@@ -13,7 +13,7 @@ model:
 
 | Method | Where | Idea |
 |---|---|---|
-| **normflow** ("general") | `models/general/` (+ shared `inference/`) | Train an sbi `NLE_A` flow (`maf`/`mdn`) as likelihood surrogate; build a generalised posterior `π(θ)·exp(-β·n·L_NSM(θ; x))`; sample it with a slice sampler. |
+| **normflow** ("general") | `models/general/` (+ shared `inference/`) | Train an sbi `NLE_A` flow (`maf`/`mdn`) as likelihood surrogate; build a generalised posterior `π(θ)·exp(-β·n·L_NSM(θ; x))`; sample it with sbi's `MCMCPosterior` (vectorised slice sampler). |
 | **conjugate** ("case 1") | `models/conjugate/` (+ shared `inference/`) | Train a neural exponential family (`T_phi`, `b_phi`) by score matching; the generalised posterior is Gaussian in closed form. |
 
 Both calibrate the learning rate / temperature **β** by bootstrap coverage
@@ -41,7 +41,6 @@ src/nsm_bayes/
   models/conjugate/          conj_model (EnergyBasedModel), conj_train (train_q_phi),
                              conj_posterior (ConjugatePosterior), tphi_net/bphi_net
   inference/bootstrap.py     bootstrap counts, importance reweighting, coverage indicator
-  inference/slice_sampler.py multivariate random-direction slice sampler (general method)
   inference/beta_calibration_loop.py  calibrate_beta (gpc/bisect/grid dispatch)
   inference/beta_update_rules.py      SA step, log-bisection, grid search
   inference/beta_bo_calibration.py    BoTorch GP beta calibration
@@ -64,8 +63,9 @@ experiments; the in-progress runner also restores
 `eps=<epsilon>/de=<density_estimator>` subfolders for turin.
 
 Note: the **Unreleased** section of the CHANGELOG still mentions
-`nsm_bayes.method`, `nsm_bayes.posterior`, `nsm_bayes.slice_sampler` and
-`nsm_bayes.utils.utils`. **None of these modules exist any more** — those
+`nsm_bayes.method`, `nsm_bayes.posterior`, `nsm_bayes.slice_sampler`,
+`nsm_bayes.inference.slice_sampler` and `nsm_bayes.utils.utils`.
+**None of these modules exist any more** — those
 entries describe an earlier layout; read them against the paths above.
 
 ## Setup and commands
@@ -87,7 +87,7 @@ python -m pytest -q
 python -m pytest -q tests/test_run_pipelines.py -k gnk   # one experiment
 ```
 
-The full suite (88 tests) takes ~5 min on CPU. Run the single relevant test file while
+The full suite (89 tests) takes ~5 min on CPU. Run the single relevant test file while
 iterating, and the full suite before you finish.
 
 ## Core design invariants — do not break these
@@ -145,7 +145,9 @@ iterating, and the full suite before you finish.
   score/Laplacian code does, rather than Python loops over observations.
 - **Log-prob safety.** `GeneralModel.log_prob` clamps flow log-probs at
   `-1e10`; `GeneralPosterior.posterior_log_prob` returns `-inf` outside the
-  prior support, which the slice sampler relies on.
+  prior support, which sbi's slice sampler relies on (it reaches the sampler
+  via `GeneralPosterior._potential`, which must propagate `-inf` per chain
+  state without error).
 
 ## Configuration (Hydra)
 
@@ -210,8 +212,10 @@ change and must go in the CHANGELOG.
 - `tests/test_units.py` holds known-answer unit tests: g-and-k quantiles vs
   the closed form, SIR parameter transforms and summaries, weighted
   moments/quantiles vs sample moments, bootstrap counts and importance
-  reweighting, jacobians/Laplacians on quadratics vs the analytic answer, the
-  slice sampler recovering a known Gaussian, `EnergyBasedModel` checkpoint
+  reweighting, jacobians/Laplacians on quadratics vs the analytic answer,
+  `GeneralPosterior.sample` (sbi `MCMCPosterior`) recovering a known Gaussian
+  and returning `-inf` outside a bounded prior's support, `EnergyBasedModel`
+  checkpoint
   round-trips, the SA/GPC/bisect/grid update rules, `calibrate_beta`'s strict
   argument validation, `chi2_ppf` vs tabulated quantiles, and the BO
   (`optimize_beta_bo`) calibration.

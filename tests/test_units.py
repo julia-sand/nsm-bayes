@@ -7,9 +7,9 @@ fixture and shared by every test that checks a property of it.
 import numpy as np
 import pytest
 import torch
+from functools import partial
 from omegaconf import OmegaConf
-from torch.distributions import MultivariateNormal
-from types import SimpleNamespace
+from torch.distributions import MultivariateNormal, Uniform
 
 import nsm_bayes.models.general.posterior as general_posterior
 from nsm_bayes.inference.bootstrap import (
@@ -20,9 +20,9 @@ from nsm_bayes.inference.bootstrap import (
     weighted_quantile,
 )
 from nsm_bayes.inference.beta_calibration_loop import calibrate_beta
-from nsm_bayes.inference.slice_sampler import run_multivariate_slice_sampler_tuned
 from nsm_bayes.models.conjugate.conj_model import EnergyBasedModel
 from nsm_bayes.models.conjugate.conj_posterior import ConjugatePosterior
+from nsm_bayes.models.general.posterior import GeneralPosterior
 from nsm_bayes.simulators.benchmark_simulators import GandKSimulator,SIRSimulator
 from nsm_bayes.utils.linalg import jacobian_and_laplacian
 from nsm_bayes.utils.statistics import estimate_stats, chi2_ppf
@@ -237,38 +237,103 @@ def test_vector_fn_gives_jacobian_rows_and_laplacian_per_output(quadratic):
 
 
 # --------------------------------------------------------------------------- #
-# 10. Slice sampler recovers a known Gaussian                                  #
+# 10. GeneralPosterior.sample (sbi MCMC) recovers a known Gaussian            #
 # --------------------------------------------------------------------------- #
-TARGET_MEAN = np.array([1.0, -2.0])
-TARGET_COV = np.array([[1.0, 0.6], [0.6, 2.0]])
-SLICE_SETTINGS = SimpleNamespace(num_samples=3000, num_chains=2, warmup_steps=300, thin=1)
+SM_TARGET_MEAN = torch.tensor([1.0, -2.0], dtype=torch.float64)
+SM_TARGET_COV = torch.tensor([[1.0, 0.6], [0.6, 2.0]], dtype=torch.float64)
+SM_TARGET_PREC = torch.linalg.inv(SM_TARGET_COV)
 
 
-@pytest.fixture(scope="module")
-def slice_samples():
-    prec = np.linalg.inv(TARGET_COV)
+def _gaussian_log_posterior(prior, theta, beta):
+    """Known 2-D Gaussian log-density (mean SM_TARGET_MEAN, cov SM_TARGET_COV).
 
-    def log_p(theta):
-        d = np.asarray(theta) - TARGET_MEAN
-        return -0.5 * d @ prec @ d
+    Stand-in for ``GeneralPosterior.posterior_log_prob``: mirrors its
+    contract, returning ``-inf`` outside the prior support and an
+    unnormalised log-density as a float otherwise.
 
-    init = MultivariateNormal(torch.zeros(2, dtype=torch.float64), torch.eye(2, dtype=torch.float64))
-    torch.manual_seed(5)
-    return run_multivariate_slice_sampler_tuned(log_p, init, SLICE_SETTINGS, seed=5)
+    Parameters
+    ----------
+    prior : torch.distributions.Distribution
+        The posterior's prior, used only for its support.
+    theta : array-like
+        Parameter vector of shape ``(d_theta,)``.
+    beta : float
+        Unused (the stand-in ignores the learning rate).
+
+    Returns
+    -------
+    float
+        Unnormalised log-density, or ``-inf`` outside the prior support.
+    """
+    theta_t = torch.as_tensor(theta, dtype=torch.float32)
+    lp = prior.log_prob(theta_t).sum()
+    if torch.isneginf(lp):
+        return -np.inf
+    d = torch.as_tensor(theta, dtype=torch.float64) - SM_TARGET_MEAN
+    return float(lp.double() - 0.5 * d @ SM_TARGET_PREC @ d)
 
 
-def test_slice_sampler_output_shape(slice_samples):
-    s = SLICE_SETTINGS
-    assert slice_samples.shape == (s.num_chains * s.num_samples, 2)
-    assert np.isfinite(slice_samples).all()
+def _build_gaussian_posterior(num_samples: int, num_chains: int = 2,
+                              warmup_steps: int = 300) -> GeneralPosterior:
+    """GeneralPosterior on tiny data, with the conftest stub flow.
+
+    The prior is bounded (a box far from the Gaussian mass, so the sampling
+    target is the Gaussian itself) so the ``-inf`` branch of
+    :meth:`GeneralPosterior._potential` is exercisable. The flow is the
+    conftest ``_StubNLE`` stand-in and is never evaluated: the tests
+    monkeypatch ``posterior_log_prob``, so only the flow's attributes matter
+    (and ``sample`` does not touch it at all). ``_StubNLE`` is used directly
+    rather than through :class:`GeneralModel` because the latter demands a
+    ``prior.loc``, which the bounded test prior does not have.
+    """
+    from tests.conftest import _StubNLE
+
+    prior = Uniform(torch.full((2,), -20.0), torch.full((2,), 20.0))
+    mcmc = {"num_chains": num_chains, "warmup_steps": warmup_steps,
+            "thin": 1, "init_strategy": "proposal"}
+    flow = _StubNLE(prior)
+    torch.manual_seed(0)
+    x_obs = torch.randn(5, 2)
+    return GeneralPosterior(x_obs=x_obs, flow_model=flow, prior=prior,
+                            mcmc=mcmc, num_samples=num_samples, robust=False)
 
 
-def test_slice_sampler_recovers_mean(slice_samples):
-    assert np.allclose(slice_samples.mean(0), TARGET_MEAN, atol=0.15)
+def _patch_log_prob(monkeypatch, post: GeneralPosterior) -> None:
+    """Point ``post.posterior_log_prob`` at the known Gaussian stand-in."""
+    monkeypatch.setattr(post, "posterior_log_prob",
+                        partial(_gaussian_log_posterior, post.prior))
 
 
-def test_slice_sampler_recovers_covariance(slice_samples):
-    assert np.allclose(np.cov(slice_samples.T), TARGET_COV, atol=0.25)
+@pytest.mark.parametrize("num_chains", [1, 2])
+def test_general_posterior_sample_shape_and_dtype(num_chains, monkeypatch):
+    torch.manual_seed(7)
+    post = _build_gaussian_posterior(num_samples=64, num_chains=num_chains,
+                                     warmup_steps=32)
+    _patch_log_prob(monkeypatch, post)
+    s = post.sample(1.0)
+    assert s.shape == (64, 2)
+    assert s.dtype == post.x_obs.dtype and s.device == post.x_obs.device
+    assert torch.isfinite(s).all()
+
+
+def test_general_posterior_sample_recovers_gaussian(monkeypatch):
+    torch.manual_seed(8)
+    post = _build_gaussian_posterior(num_samples=3000)
+    _patch_log_prob(monkeypatch, post)
+    s = post.sample(1.0)
+    assert s.shape == (3000, 2)
+    assert torch.allclose(s.mean(0).double(), SM_TARGET_MEAN, atol=0.15)
+    assert torch.allclose(torch.cov(s.T.double(), correction=0), SM_TARGET_COV, atol=0.25)
+
+
+def test_general_posterior_potential_is_minus_inf_outside_prior_support(monkeypatch):
+    """The test prior is bounded: _potential returns -inf (no error) outside."""
+    post = _build_gaussian_posterior(num_samples=32, warmup_steps=8)
+    _patch_log_prob(monkeypatch, post)
+    theta = torch.tensor([[100.0, 0.0], [1.0, -2.0]], dtype=torch.float32)
+    v = post._potential(theta, post.x_obs, beta=1.0)
+    assert v.shape == (2,)
+    assert torch.isneginf(v[0]) and torch.isfinite(v[1])
 
 
 # --------------------------------------------------------------------------- #

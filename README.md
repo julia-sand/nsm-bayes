@@ -12,7 +12,7 @@ There are two surrogate likelihood models used:
 
 - **normflow**: This is an sbi `NLE_A` normalising flow as the
   likelihood surrogate, builds the generalised posterior
-  `π(θ)·exp(-β·n·L_NSM(θ; x))` and samples it with a slice sampler.
+  `π(θ)·exp(-β·n·L_NSM(θ; x))` and samples it with sbi's MCMC slice sampler.
 - **conjugate**: trains a neural exponential family
   (`T_φ`, `b_φ`) by score matching. The generalised posterior then has a closed form.
 
@@ -53,7 +53,6 @@ There are four benchmark example data simulators used (`gnk`, `sir`, `sir_underc
 │       │   ├── beta_calibration_loop.py # unified coverage-matching loop (calibrate_beta)
 │       │   ├── beta_update_rules.py     # update rules: gpc (SA), bisection, grid
 │       │   ├── bootstrap.py             # importance-reweighted bootstrap helpers
-│       │   └── slice_sampler.py         # multivariate slice sampler (normflow method)
 │       ├── models/
 │       │   ├── conjugate/          # EnergyBasedModel, score-matching training,
 │       │   │                        # closed-form ConjugatePosterior, T_phi/b_phi nets

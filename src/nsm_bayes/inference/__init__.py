@@ -12,6 +12,4 @@
   (:func:`~nsm_bayes.inference.beta_bo_calibration.optimize_beta_bo`).
 * :mod:`nsm_bayes.inference.bootstrap` holds the importance-reweighted
   bootstrap helpers used by the general calibration.
-* :mod:`nsm_bayes.inference.slice_sampler` holds slice-sampling for the
-  normalising-flow posterior.
 """
